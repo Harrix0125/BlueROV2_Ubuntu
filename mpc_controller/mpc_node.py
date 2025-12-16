@@ -4,17 +4,18 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float32
+from mavros_msgs.msg import OverrideRCIn
 
 import numpy as np
 import sys
 import os
 
 #sorry but here i have my blueROV2 repo and i need to add it to the path... the NMPC is there
-sys.path.append('/home/enrico/ros2_ws/src/blueROV2/mpc_controller/mpc_controller/nmpc_solver_acados')
 
+sys.path.append(os.path.expanduser('~/ros2_ws/src/mpc_controller/BlueROV2'))
 
-from ...BlueROV2.nmpc_solver_acados import Acados_Solver_Wrapper
-from ...BlueROV2.nmpc_params import NMPC_params as MPCC
+from nmpc_solver_acados import Acados_Solver_Wrapper
+from nmpc_params import NMPC_params as MPCC
 
 class NMPCNode(Node):
     def __init__(self):
@@ -36,22 +37,31 @@ class NMPCNode(Node):
             depth=1
         )
 
+        #self.create_subscription(
+        #    Odometry,
+        #    '/mavros/bluerov2_heavy/odometry',
+        #    self.odom_callback,
+        #    qos_sensor
+        #)
+
         self.create_subscription(
             Odometry,
-            '/mavros/bluerov2_heavy/odometry',
+            '/mavros/local_position/odom',
             self.odom_callback,
             qos_sensor
         )
+        
 
-        self.thruster_pub = []
-        for i in range(1, 9):
-            topic = f'/model/bluerov2_heavy/joint/thruster{i}_joint/cmd_thrust'
-            pub = self.create_publisher(
-                Float32,
-                topic,
-                10
-            )
-            self.thruster_pub.append(pub)
+        #self.thruster_pub = []
+        #for i in range(1, 9):
+        #    topic = f'/model/bluerov2_heavy/joint/thruster{i}_joint/cmd_thrust'
+        #    pub = self.create_publisher(
+        #        Float32,
+        #        topic,
+        #        10
+        #    )
+        #    self.thruster_pub.append(pub)
+        self.rc_pub = self.create_publisher(OverrideRCIn, '/mavros/rc/override', 10)
 
         self.dt = MPCC.T_s
         self.create_timer(self.dt, self.control_loop)
@@ -63,6 +73,7 @@ class NMPCNode(Node):
         Updates the current state vector [12x1] from ROS Odometry.
         ROS Odom: Position (x,y,z), Orientation (Quat), Linear Vel (u,v,w), Angular Vel (p,q,r)
         """
+        print("Odom callback triggered")
         # Position
         self.current_state[0] = msg.pose.pose.position.x
         self.current_state[1] = msg.pose.pose.position.y
@@ -90,6 +101,7 @@ class NMPCNode(Node):
         """
         Convert quaternion (x, y, z, w) to Euler angles (roll, pitch, yaw)
         """
+        print("Converting quaternion to euler angles")
         t0 = +2.0 * (w * x + y * z)
         t1 = +1.0 - 2.0 * (x * x + y * y)
         roll_x = np.arctan2(t0, t1)
@@ -105,10 +117,34 @@ class NMPCNode(Node):
 
         return roll_x, pitch_y, yaw_z
     
+    def map_thrust_to_pwm(self, thrust):
+        """
+        Maps thrust command (N) to PWM signal for BlueROV2 thrusters.
+        Assuming linear mapping for simplicity.
+        """
+        print("Mapping thrust to PWM")
+        # Example mapping parameters (to be adjusted based on actual thruster characteristics)
+        min_thrust = -25.0  # N
+        max_thrust = 25.0   # N
+        min_pwm = 1100      # PWM signal for full reverse
+        max_pwm = 1900      # PWM signal for full forward
+        neutral_pwm = 1500  # PWM signal for neutral
+
+        # Saturate thrust just in case
+        if thrust < min_thrust:
+            thrust = min_thrust
+        elif thrust > max_thrust:
+            thrust = max_thrust
+        
+        pwm = neutral_pwm + (thrust / max_thrust) * (max_pwm - neutral_pwm)
+
+        return int(pwm)
+
     def control_loop(self):
         """
         Main control loop: Solve NMPC and publish thruster commands.
         """
+        print("Control loop triggered")
         # Solve NMPC
         try:
             u_opt = self.solver.solve(self.current_state, self.target_state)
@@ -117,19 +153,41 @@ class NMPCNode(Node):
             u_opt = np.zeros(8)
             return
         
+
+        msg = OverrideRCIn()
+        msg.channels = [65535]*8
         # Publish thruster commands
-        for i, thrust in enumerate(u_opt):
-            msg = Float32()
-            msg.data = float(thrust)
-            self.thruster_pub[i].publish(msg)
+        #for i, thrust in enumerate(u_opt):
+        #    msg = Float32()
+        #    msg.data = float(thrust)
+        #    self.thruster_pub[i].publish(msg)
+        for i in range(8):
+            if i < len(u_opt):
+                msg.channels[i] = self.map_thrust_to_pwm(u_opt[i])
+        self.rc_pub.publish(msg)
 
-
+#def main(args=None):
+#        rclpy.init(args=args)
+#        Node = NMPCNode()
+#        rclpy.spin(Node)
+#        Node.destroy_node()
+#        rclpy.shutdown()
+#change
 def main(args=None):
-        rclpy.init(args=args)
-        Node = NMPCNode()
-        rclpy.spin(Node)
-        Node.destroy_node()
+    rclpy.init(args=args)
+    node = NMPCNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # SAFETY: Stop motors on shutdown
+        stop_msg = OverrideRCIn()
+        stop_msg.channels = [1500] * 8 + [65535] * 10
+        node.rc_pub.publish(stop_msg)
+        node.destroy_node()
         rclpy.shutdown()
 
 if __name__ == '__main__':
         main()
+
