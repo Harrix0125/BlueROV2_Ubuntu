@@ -3,7 +3,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Float32
+from std_msgs.msg import Float64
 from mavros_msgs.msg import OverrideRCIn
 
 import numpy as np
@@ -46,21 +46,17 @@ class NMPCNode(Node):
 
         self.create_subscription(
             Odometry,
-            '/mavros/local_position/odom',
+            '/model/bluerov2_heavy/odometry',
             self.odom_callback,
             qos_sensor
         )
         
 
-        #self.thruster_pub = []
-        #for i in range(1, 9):
-        #    topic = f'/model/bluerov2_heavy/joint/thruster{i}_joint/cmd_thrust'
-        #    pub = self.create_publisher(
-        #        Float32,
-        #        topic,
-        #        10
-        #    )
-        #    self.thruster_pub.append(pub)
+        self.thruster_pubs = []
+        for i in range(1, 9):
+            topic = f'/model/bluerov2_heavy/joint/thruster{i}_joint/cmd_thrust'
+            pub = self.create_publisher(Float64, topic, 10)
+            self.thruster_pubs.append(pub)
         self.rc_pub = self.create_publisher(OverrideRCIn, '/mavros/rc/override', 10)
 
         self.dt = MPCC.T_s
@@ -157,14 +153,14 @@ class NMPCNode(Node):
         msg = OverrideRCIn()
         msg.channels = [65535]*8
         # Publish thruster commands
-        #for i, thrust in enumerate(u_opt):
-        #    msg = Float32()
-        #    msg.data = float(thrust)
-        #    self.thruster_pub[i].publish(msg)
-        for i in range(8):
-            if i < len(u_opt):
-                msg.channels[i] = self.map_thrust_to_pwm(u_opt[i])
-        self.rc_pub.publish(msg)
+        for i, thrust in enumerate(u_opt):
+            msg = Float64()
+            msg.data = float(thrust)
+            self.thruster_pubs[i].publish(msg)
+        #for i in range(8):
+        #    if i < len(u_opt):
+        #        msg.channels[i] = self.map_thrust_to_pwm(u_opt[i])
+        #self.rc_pub.publish(msg)
 
 #def main(args=None):
 #        rclpy.init(args=args)

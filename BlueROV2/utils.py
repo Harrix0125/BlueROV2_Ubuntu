@@ -1,7 +1,7 @@
 import numpy as np
 import casadi as cas
+import matplotlib.pyplot as plt
 from nmpc_params import NMPC_params as MPCC
-
 def get_J1(phi, theta, psi):
     """Calculates Rotation Matrix (Body -> World) for kinematics"""
     cphi, sphi = np.cos(phi), np.sin(phi)
@@ -147,3 +147,89 @@ def get_linear_traj(start, end, steps, steps_done=0):
         moving_start = (end[i] - start[i])/10
         traj[i,:] = np.linspace(moving_start, end[i], steps-steps_done)
     return traj
+
+def generate_target_trajectory(steps, dt, speed):
+    """
+    Generates a 12-state trajectory for MPC testing.
+    Returns: numpy array of shape (steps, 12)
+    States: [x, y, z, phi, theta, psi, u, v, w, p, q, r]
+    """
+    
+    # Initialize State Matrix (steps x 12)
+    # Col 0-2: Pos (x, y, z)
+    # Col 3-5: Angle (phi, theta, psi)
+    # Col 6-8: LinVel Body (u, v, w)
+    # Col 9-11: AngVel Body (p, q, r)
+    states = np.zeros((steps, 12))
+    
+    # Initial Conditions (Start at 0,0, -5m depth)
+    states[0, 2] = -5.0 
+    
+    # Simulation Variables
+    current_x, current_y, current_z = 0.0, 0.0, -5.0
+    current_psi = 2.0  # Yaw
+    current_theta = 1.0 # Pitch
+    
+    for k in range(steps - 1):
+        # --- 1. Generate Control Inputs (Steering) ---
+        # We simulate "commands" to turn the target
+        # Randomize Yaw Rate (r) - Turning left/right
+        target_r = np.random.normal(-0.1, 0.1) 
+        
+        # Randomize Pitch Rate (q) - Diving/Surfacing
+        # Keep it small and spring-loaded to return to horizon
+        target_q = np.random.normal(0.0, 0.1) - (current_theta * 0.1)
+        
+        # Roll (p) is usually 0 for a stable sub
+        target_p = 0.0
+        
+        # Surge Speed (u) - Mostly constant forward motion
+        target_u = speed + np.random.normal(0.0, 0.05)
+        
+        # Sway (v) and Heave (w) are 0 (assuming sub moves forward)
+        target_v = 0.0
+        target_w = 0.0
+
+        # --- 2. Fill Velocity States (Body Frame) ---
+        # In a real dynamic model, forces cause these. 
+        # Here we just set them kinematically for the reference.
+        states[k+1, 6] = target_u
+        states[k+1, 7] = target_v
+        states[k+1, 8] = target_w
+        states[k+1, 9] = target_p
+        states[k+1, 10] = target_q
+        states[k+1, 11] = target_r
+
+        # --- 3. Update Angles (Euler Integration) ---
+        # Update Yaw and Pitch based on rates
+        current_psi += target_r * dt
+        current_theta += target_q * dt
+        
+        states[k+1, 3] = 0.0 # Roll (phi)
+        states[k+1, 4] = current_theta
+        states[k+1, 5] = current_psi
+
+        # --- 4. Update Position (World Frame) ---
+        # We must rotate Body Velocity (u,v,w) into World Velocity (dx, dy, dz)
+        # Using standard Rotation Matrix for Yaw (psi) and Pitch (theta)
+        
+        # Simplified Rotation (assuming small Roll)
+        # dx = u * cos(theta) * cos(psi)
+        dx = target_u * np.cos(current_theta) * np.cos(current_psi)
+        
+        # dy = u * cos(theta) * sin(psi)
+        dy = target_u * np.cos(current_theta) * np.sin(current_psi)
+        
+        # dz = -u * sin(theta) (Negative because Z is Down)
+        dz = -target_u * np.sin(current_theta)
+
+        current_x += dx * dt
+        current_y += dy * dt
+        current_z += dz * dt
+        
+        states[k+1, 0] = current_x
+        states[k+1, 1] = current_y
+        states[k+1, 2] = current_z
+
+    return states
+
