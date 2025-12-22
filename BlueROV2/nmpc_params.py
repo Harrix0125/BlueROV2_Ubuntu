@@ -2,8 +2,8 @@ import numpy as np
 import casadi as cas
 
 class NMPC_params:
-    N = 300             # Prediction horizon (steps)
-    T_s = 0.02          # Time step (seconds) - 20Hz is standard for underwater
+    N = 280             # Prediction horizon (steps)
+    T_s = 0.03      # Time step (seconds) - 20Hz is standard for underwater
     
     m = 11.5            # mass [kg]
     W = 112.8           # weight [N]
@@ -93,7 +93,7 @@ class NMPC_params:
     
     # Tuning Weights
     # Position Errors [x, y, z, phi, theta, psi]
-    pos_coef = 5.0
+    pos_coef = 6.0
     angle_coef = 0.0
     Q_POS = [pos_coef, pos_coef, pos_coef, angle_coef, angle_coef, angle_coef] 
     
