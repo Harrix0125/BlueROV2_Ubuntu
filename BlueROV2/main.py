@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from mpl_toolkits.mplot3d import Axes3D
+from estimator import EKF
+import casadi as cas
 
 from nmpc_solver_acados import Acados_Solver_Wrapper
 from nmpc_params import NMPC_params as MPCC
@@ -35,8 +37,11 @@ def simulation():
     # Storage
     traj_x, traj_y, traj_z = [], [], []
     traj_phi, traj_theta, traj_psi = [], [], []
+
+    EKFtraj_x, EKFtraj_y, EKFtraj_z = [], [], []
+    EKFtraj_phi, EKFtraj_theta, EKFtraj_psi = [], [], []
     thrust_history = []   
-    t_simulation = 100 #sec
+    t_simulation = 20 #sec
     steps_tot = int(t_simulation /  MPCC.T_s)
 
     # Assuming that this is the data we get from our ideal camera system
@@ -47,15 +52,26 @@ def simulation():
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
     round = 4
     
+    ekf = EKF()
+    state_estimate = np.copy(state_now)
 
     if round ==4:
         for i in range(steps_tot): 
             # Solve
             current_target = state_moving[i,:]
-            ref_guidance = get_standoff_reference(state_now, current_target, desired_dist=2.0, lookahead=1.0)
-            u_optimal = solver.solve(state_now, ref_guidance)
-            # Plant Step
+            ref_guidance = get_standoff_reference(state_estimate, current_target, desired_dist=2.0, lookahead=1.0)
+            u_optimal = solver.solve(state_estimate, ref_guidance)
+            # Plant Step [Imagine this as GPS]
             state_now = robot_plant_step(state_now, u_optimal, MPCC.T_s)
+
+            # EKF:
+            noise_ekf = np.random.normal(0, [0.05, 0.05, 0.05, 0.01, 0.01, 0.01, 0.05, 0.05, 0.02, 0.01, 0.01, 0.01])
+            measured_state = state_now + noise_ekf
+            # Updates EKF P and state estimate
+            ekf.predict(u_optimal)
+            # Gets new state estimate with K gain
+            state_estimate = ekf.measurement_update(measured_state)
+
 
             # Keep track of data for plotting
             traj_x.append(state_now[0])
@@ -65,6 +81,13 @@ def simulation():
             traj_theta.append(state_now[4]) # Pitch
             traj_psi.append(state_now[5])   # Yaw
             thrust_history.append(u_optimal)
+            
+            EKFtraj_x.append(state_estimate[0])
+            EKFtraj_y.append(state_estimate[1])
+            EKFtraj_z.append(state_estimate[2])
+            EKFtraj_phi.append(state_estimate[3])   # Roll
+            EKFtraj_theta.append(state_estimate[4]) # Pitch
+            EKFtraj_psi.append(state_estimate[5])   # Yaw
 
     elif round == 3:
         for i in range(steps_tot): 
@@ -129,6 +152,14 @@ def simulation():
                     traj_x, 
                     traj_y, 
                     traj_z, 
+                    state_moving,   # This is your target array (steps, 12)
+                    MPCC.T_s,       # Time step
+                    desired_dist=2.0
+                )
+        LOS_plot_standoff_tracking(
+                    EKFtraj_x, 
+                    EKFtraj_y, 
+                    EKFtraj_z, 
                     state_moving,   # This is your target array (steps, 12)
                     MPCC.T_s,       # Time step
                     desired_dist=2.0

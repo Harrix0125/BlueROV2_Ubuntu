@@ -70,30 +70,27 @@ def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=
     Calculates a 'Virtual Reference' for the NMPC to track.
     This creates a carrot-stick approach to maintain distance.
     """
-    # 1. Unpack positions
+    # Unpack positions
     x_r, y_r = rov_state[0], rov_state[1]
     x_t, y_t = target_state[0], target_state[1]
     
-    # 2. Calculate Distance and Bearing to Target
+    # Distance and Bearing to Target
     dx = x_t - x_r
     dy = y_t - y_r
     dist = np.linalg.norm([dx, dy])
     angle_to_target = np.arctan2(dy, dx)
     
-    # 3. Distance Controller (P-Controller for Surge Speed)
-    # If dist > 2m: speed is positive (move forward)
-    # If dist < 2m: speed is negative (back up)
-    k_speed = 0.5
+    # Distance Controller?
+    k_speed = 1.2
     u_des = k_speed * (dist - desired_dist)
     
     # Clamp speed for safety (e.g., max 1.5 m/s)
     u_des = np.clip(u_des, -0.5, 1.5)
     
-    # 4. Heading Controller (Line of Sight)
-    # Simply look at the target
+    # Line of Sight: simply look at the target
     psi_des = angle_to_target
     
-    # 5. Create the "Virtual Carrot" Position
+    # Create the "Virtual Carrot" Position
     # We place a reference point 'lookahead' meters away in the desired direction
     # This tricks the Position-Weighted NMPC into moving that way.
     x_ref = x_r + lookahead * np.cos(psi_des)
@@ -105,7 +102,7 @@ def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=
     x_ref = x_r + (u_des * 1.0) * np.cos(psi_des) # 1.0 sec projection
     y_ref = y_r + (u_des * 1.0) * np.sin(psi_des)
 
-    # 6. Build the Reference State Vector (12,)
+    # Build the Reference State Vector (12,)
     # [x, y, z, phi, theta, psi, u, v, w, p, q, r]
     ref_state = np.zeros(12)
     ref_state[0] = x_ref
@@ -291,7 +288,8 @@ def generate_target_trajectory(steps, dt, speed):
         # --- 1. Generate Control Inputs (Steering) ---
         # We simulate "commands" to turn the target
         # Randomize Yaw Rate (r) - Turning left/right
-        target_r = 0.18*np.sin(0.01*k) + 0.1*np.sin(0.001*k) # turning L/R
+        target_r = 0.18*np.sin(0.01*k) + 0.1*np.sin(0.0003*k)  #turning L/R
+
         # Randomize Pitch Rate (q) - Diving/Surfacing
         # Keep it small and spring-loaded to return to horizon
         target_q = np.random.normal(0.0, 0.1) - (current_theta * 0.1)
