@@ -71,24 +71,38 @@ def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=
     This creates a carrot-stick approach to maintain distance.
     """
     # Unpack positions
-    x_r, y_r = rov_state[0], rov_state[1]
-    x_t, y_t = target_state[0], target_state[1]
+    x_r, y_r, z_r = rov_state[0], rov_state[1], rov_state[2]
+    x_t, y_t, z_t = target_state[0], target_state[1], target_state[2]
     
     # Distance and Bearing to Target
     dx = x_t - x_r
     dy = y_t - y_r
-    dist = np.linalg.norm([dx, dy])
-    angle_to_target = np.arctan2(dy, dx)
-    
+    dz = z_t - z_r
+    dist_3d = np.linalg.norm([dx, dy, dz])
+    dist_plane = np.linalg.norm([dx, dy])
+    pitch_d = np.arctan2(-dz, dist_plane)  # Negative because Z is down
+    yaw_d = np.arctan2(dy, dx)
+    if abs(dist_plane) < 0.01:
+        yaw_d = 0.0  # Prevent NaN when directly above/below
+    #elif abs(dist_3d) < 2:
+    #    yaw_d = yaw_d**3  # Slow down yaw changes when very close
+
+    if abs(dist_3d) < 0.01:
+        pitch_d = 0.0  # Prevent NaN when at same position
+    #elif abs(dist_3d) < 2:
+    #    pitch_d = pitch_d**3  # Slow down pitch changes when very close
+
     # Distance Controller?
-    k_speed = 1.2
-    u_des = k_speed * (dist - desired_dist)
+    u_speed = 1.2
+    w_speed = 0.5
+    u_des = u_speed * (dist_3d - desired_dist)
+    w_des = w_speed * (-dz - 0.5)  # Maintain slight depth offset of 0.5m below target
     
-    # Clamp speed for safety (e.g., max 1.5 m/s)
-    u_des = np.clip(u_des, -0.5, 1.5)
+    # Clamp speed for safety (e.g., max 0.5 m/s)
+    u_des = np.clip(u_des, -0.9, 1.9)
     
     # Line of Sight: simply look at the target
-    psi_des = angle_to_target
+    psi_des = yaw_d
     
     # Create the "Virtual Carrot" Position
     # We place a reference point 'lookahead' meters away in the desired direction
@@ -99,8 +113,8 @@ def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=
     # If we want to STOP (u_des ~ 0), we should set reference to current position
     # But if we want to move, we project it. 
     # A cleaner way for NMPC: Set ref pos based on u_des
-    x_ref = x_r + (u_des * 1.0) * np.cos(psi_des) # 1.0 sec projection
-    y_ref = y_r + (u_des * 1.0) * np.sin(psi_des)
+    x_ref = x_r + (u_des * 1.3) * np.cos(psi_des) # 1.0 sec projection
+    y_ref = y_r + (u_des * 1.3) * np.sin(psi_des)
 
     # Build the Reference State Vector (12,)
     # [x, y, z, phi, theta, psi, u, v, w, p, q, r]
@@ -109,10 +123,12 @@ def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=
     ref_state[1] = y_ref
     ref_state[2] = target_state[2] # Match target depth
     ref_state[3] = 0 # Roll 0
-    ref_state[4] = 0 # Pitch 0
+    ref_state[4] = pitch_d
     ref_state[5] = psi_des # DESIRED HEADING
     ref_state[6] = u_des   # DESIRED SURGE
-    
+
+    ref_state[8] = 0  # Desired Heave
+
     # Rest are zero
     return ref_state
 
@@ -276,19 +292,23 @@ def generate_target_trajectory(steps, dt, speed):
     # Col 9-11: AngVel Body (p, q, r)
     states = np.zeros((steps, 12))
     
-    # Initial Conditions (Start at 0,0, -5m depth)
-    states[0, 2] = -5.0 
-    
+    # Initial Conditions
+    states[0,0] = 1.8
+    states[0,1] = -3
+    states[0,2] = -3.0
+
+    states[0,4] = 0.5  # Pitch
+    states[0,5] = 0.0  # Yaw
     # Simulation Variables
-    current_x, current_y, current_z = 0.0, 0.0, -5.0
-    current_psi = 2.0  # Yaw
-    current_theta = 1.0 # Pitch
-    
+    current_x, current_y, current_z = states[0, 0], states[0, 1], states[0, 2]
+    current_psi = states[0, 5]  # Yaw
+    current_theta = states[0, 4] # Pitch
+
     for k in range(steps - 1):
         # --- 1. Generate Control Inputs (Steering) ---
         # We simulate "commands" to turn the target
         # Randomize Yaw Rate (r) - Turning left/right
-        target_r = 0.18*np.sin(0.01*k) + 0.1*np.sin(0.0003*k)  #turning L/R
+        target_r = -0.1*np.sin(0.004*k) + 0.08*np.sin(0.0003*k)  #turning L/R
 
         # Randomize Pitch Rate (q) - Diving/Surfacing
         # Keep it small and spring-loaded to return to horizon
