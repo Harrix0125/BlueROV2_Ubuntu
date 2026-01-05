@@ -65,7 +65,7 @@ def get_error_dynamics(model, target_state):
     
     return epsilon, epsilon_dot
 
-def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=1.0):
+def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=1.0, time_predict=1.8):
     """
     Calculates a 'Virtual Reference' for the NMPC to track.
     This creates a carrot-stick approach to maintain distance.
@@ -80,7 +80,7 @@ def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=
     dz = z_t - z_r
     dist_3d = np.linalg.norm([dx, dy, dz])
     dist_plane = np.linalg.norm([dx, dy])
-    pitch_d = np.arctan2(-dz, dist_plane)  # Negative because Z is down
+    pitch_d = np.arctan2(-dz, dist_plane)
     yaw_d = np.arctan2(dy, dx)
     if abs(dist_plane) < 0.01:
         yaw_d = 0.0  # Prevent NaN when directly above/below
@@ -93,13 +93,16 @@ def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=
     #    pitch_d = pitch_d**3  # Slow down pitch changes when very close
 
     # Distance Controller?
-    u_speed = 1.2
-    w_speed = 0.5
-    u_des = u_speed * (dist_3d - desired_dist)
-    w_des = w_speed * (-dz - 0.5)  # Maintain slight depth offset of 0.5m below target
-    
+    u_speed = 1.3
+    w_speed = 1.3
+    z_speed = w_speed * (dz)
+    x_speed = u_speed * (dist_3d - desired_dist) 
+
+    u_des = np.cos(rov_state[4])*x_speed + np.sin(rov_state[4])*z_speed
+    w_des = -np.sin(rov_state[4])*x_speed + np.cos(rov_state[4])*z_speed
+
     # Clamp speed for safety (e.g., max 0.5 m/s)
-    u_des = np.clip(u_des, -0.9, 1.9)
+    #u_des = np.clip(u_des, -0.9, 1.9)
     
     # Line of Sight: simply look at the target
     psi_des = yaw_d
@@ -113,8 +116,10 @@ def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=
     # If we want to STOP (u_des ~ 0), we should set reference to current position
     # But if we want to move, we project it. 
     # A cleaner way for NMPC: Set ref pos based on u_des
-    x_ref = x_r + (u_des * 1.3) * np.cos(psi_des) # 1.0 sec projection
-    y_ref = y_r + (u_des * 1.3) * np.sin(psi_des)
+    x_ref = x_r + (x_speed * time_predict) * np.cos(psi_des)
+    y_ref = y_r + (x_speed * time_predict) * np.sin(psi_des)
+    z_ref = z_r + (z_speed * time_predict)
+    # But to maintain depth relative to target, we can also do:
 
     # Build the Reference State Vector (12,)
     # [x, y, z, phi, theta, psi, u, v, w, p, q, r]
@@ -122,12 +127,16 @@ def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=
     ref_state[0] = x_ref
     ref_state[1] = y_ref
     ref_state[2] = target_state[2] # Match target depth
+    ref_state[2] = z_ref
     ref_state[3] = 0 # Roll 0
     ref_state[4] = pitch_d
     ref_state[5] = psi_des # DESIRED HEADING
     ref_state[6] = u_des   # DESIRED SURGE
 
-    ref_state[8] = 0  # Desired Heave
+    ref_state[8] = w_des  # Desired Heave
+
+
+    ref_state[11] = (psi_des-rov_state[5]) / 10
 
     # Rest are zero
     return ref_state
@@ -166,7 +175,55 @@ def get_J2(phi, theta, psi):
         cas.horzcat(0, sphi/cth, cphi/cth)
     )
     return J2
+import numpy as np
 
+def get_J1_np(phi, theta, psi):
+    """
+    Numpy implementation of Rotation Matrix (Body -> World).
+    Standard Z-Y-X rotation sequence.
+    """
+    cphi, sphi = np.cos(phi), np.sin(phi)
+    cth, sth = np.cos(theta), np.sin(theta)
+    cpsi, spsi = np.cos(psi), np.sin(psi)
+
+    r11 = cpsi * cth
+    r12 = -spsi * cphi + sphi * sth * cpsi
+    r13 = spsi * sphi + sth * cpsi * cphi
+
+    r21 = spsi * cth
+    r22 = cpsi * cphi + sphi * sth * spsi
+    r23 = -cpsi * sphi + sth * spsi * cphi
+
+    r31 = -sth
+    r32 = sphi * cth
+    r33 = cphi * cth
+
+    J1 = np.array([
+        [r11, r12, r13],
+        [r21, r22, r23],
+        [r31, r32, r33]
+    ])
+    return J1
+
+def get_J2_np(phi, theta, psi):
+    """
+    Numpy implementation of Angular Velocity Transformation.
+    Maps Body rates [p, q, r] to Euler rates [dphi, dtheta, dpsi].
+    """
+    cphi, sphi = np.cos(phi), np.sin(phi)
+    cth = np.cos(theta)
+    ttheta = np.tan(theta)
+
+    # Prevent division by zero singularity at pitch = +/- 90 deg
+    if abs(cth) < 0.01: 
+        cth = np.sign(cth) * 0.01
+
+    J2 = np.array([
+        [1, sphi * ttheta, cphi * ttheta],
+        [0, cphi,         -sphi],
+        [0, sphi / cth,    cphi / cth]
+    ])
+    return J2
 def get_C_cas(nu):
     C_rb = cas.MX.zeros(6, 6)
     # Row 0
@@ -187,9 +244,65 @@ def get_C_cas(nu):
     C_a[4, 0] =  MPCC.Z_wd * nu[2]; C_a[4, 2] = -MPCC.X_ud * nu[0]; C_a[4, 3] =  MPCC.N_rd * nu[5]; C_a[4, 5] = -MPCC.K_pd * nu[3]
     C_a[5, 0] = -MPCC.Y_vd * nu[1]; C_a[5, 1] =  MPCC.X_ud * nu[0]; C_a[5, 3] = -MPCC.M_qd * nu[4]; C_a[5, 4] = MPCC.K_pd * nu[3]
 
-    coriolis_sum = C_rb + C_a
+    coriolis_sum = C_rb 
 
     return coriolis_sum
+def get_C_SX(nu):
+    """
+    Computes Coriolis matrix using strictly CasADi SX types 
+    to match the model definition.
+    """
+    # 1. Create Empty SX Matrix (NOT np.zeros, NOT MX.zeros)
+    C_rb = cas.SX.zeros(6, 6)
+    
+    m = MPCC.m
+    # Use explicit float casting for constants to be safe
+    Ix, Iy, Iz = float(MPCC.Ix), float(MPCC.Iy), float(MPCC.Iz)
+    
+    # 2. Fill Rigid Body Coriolis (Standard SNAME)
+    # Note: We access nu by index directly
+    u, v, w = nu[0], nu[1], nu[2]
+    p, q, r = nu[3], nu[4], nu[5]
+
+    # Row 0
+    C_rb[0, 4] =  m * w;   C_rb[0, 5] = -m * v
+    # Row 1
+    C_rb[1, 3] = -m * w;   C_rb[1, 5] =  m * u
+    # Row 2
+    C_rb[2, 3] =  m * v;   C_rb[2, 4] = -m * u
+    # Row 3
+    C_rb[3, 1] = -m * w;   C_rb[3, 2] =  m * v;   C_rb[3, 4] =  Iz * r;   C_rb[3, 5] = -Iy * q
+    # Row 4
+    C_rb[4, 0] =  m * w;   C_rb[4, 2] = -m * u;   C_rb[4, 3] = -Iz * r;   C_rb[4, 5] =  Ix * p
+    # Row 5
+    C_rb[5, 0] = -m * v;   C_rb[5, 1] =  m * u;   C_rb[5, 3] =  Iy * q;   C_rb[5, 4] = -Ix * p
+    
+    # 3. Added Mass Coriolis (C_a)
+    C_a = cas.SX.zeros(6, 6)
+    Xud, Yvd, Zwd = float(MPCC.X_ud), float(MPCC.Y_vd), float(MPCC.Z_wd)
+    Kpd, Mqd, Nrd = float(MPCC.K_pd), float(MPCC.M_qd), float(MPCC.N_rd)
+
+    # Approximated diagonal Added Mass Coriolis
+    # (Check your specific notation signs, these follow Fossen generally)
+    a1 = Xud * u
+    a2 = Yvd * v
+    a3 = Zwd * w
+    b1 = Kpd * p
+    b2 = Mqd * q
+    b3 = Nrd * r
+
+    C_a[0, 5] = -a2;   C_a[0, 4] =  a3
+    C_a[1, 5] =  a1;   C_a[1, 3] = -a3
+    C_a[2, 4] = -a1;   C_a[2, 3] =  a2
+
+    C_a[3, 5] = -b2;   C_a[3, 4] =  b3;  C_a[3, 2] = -a2;  C_a[3, 1] =  a3
+    C_a[4, 5] = -b1;   C_a[4, 3] = -b3;  C_a[4, 2] =  a1;  C_a[4, 0] = -a3
+    C_a[5, 4] =  b1;   C_a[5, 3] =  b2;  C_a[5, 1] = -a1;  C_a[5, 0] =  a2
+
+    # Note: C_np had some sign diffs and transposition relative to standard Fossen.
+    # Ensure this matches your specific model notation (SNAME vs Fossen 1994).
+    
+    return C_rb + C_a
 
 def get_C_np(nu):
     C_rb = np.zeros((6, 6))
@@ -211,9 +324,80 @@ def get_C_np(nu):
     C_a[4, 0] =  MPCC.Z_wd * nu[2]; C_a[4, 2] = -MPCC.X_ud * nu[0]; C_a[4, 3] =  MPCC.N_rd * nu[5]; C_a[4, 5] = -MPCC.K_pd * nu[3]
     C_a[5, 0] = -MPCC.Y_vd * nu[1]; C_a[5, 1] =  MPCC.X_ud * nu[0]; C_a[5, 3] = -MPCC.M_qd * nu[4]; C_a[5, 4] = MPCC.K_pd * nu[3]
 
-    coriolis_sum = C_rb
+    coriolis_sum = C_rb + C_a
 
     return coriolis_sum
+def get_x_dot(x_state, u_control):
+    """
+    Calculates x_dot = f(x, u) using purely Numpy math.
+    """
+    # 1. Unpack State
+    eta = x_state[0:6]   # [x, y, z, phi, theta, psi]
+    nu  = x_state[6:12]  # [u, v, w, p, q, r]
+    
+    phi, theta, psi = eta[3], eta[4], eta[5]
+
+    # 2. Forces
+    # Thruster Forces
+    tau = MPCC.TAM @ u_control
+    
+    # Linear Damping
+    damping_lin = MPCC.D_LIN @ nu
+    
+    # Quadratic Damping (Element-wise calculation)
+    # Using abs() ensures drag always opposes motion
+    dq_diag = np.abs(nu) * MPCC.D_QUAD_COEFFS 
+    damping_quad = dq_diag * nu 
+    
+    # Restoring Forces (Gravity/Buoyancy)
+    W, B, zg = MPCC.W, MPCC.B, MPCC.zg
+    diff = W - B
+    
+    g_force = np.array([
+        -diff * np.sin(theta),
+        diff * np.cos(theta) * np.sin(phi),
+        diff * np.cos(theta) * np.cos(phi),
+        zg * W * np.cos(theta) * np.sin(phi),
+        zg * W * np.sin(theta),
+        0.0
+    ])
+
+    # Coriolis (Using the Numpy version)
+    # Ensure get_C_np returns a numpy array, not CasADi
+    C_mat = get_C_np(nu) 
+    coriolis_force = C_mat @ nu
+
+    # 3. Acceleration Dynamics: M * acc = Sum_Forces
+    # Total Force in Body Frame
+    total_force = tau - damping_lin - damping_quad - g_force - coriolis_force
+    
+    # Body Acceleration
+    acc = MPCC.M_INV @ total_force
+
+    # 4. Kinematics: Velocities -> Pos/Angle rates
+    J1 = get_J1_np(phi, theta, psi)
+    J2 = get_J2_np(phi, theta, psi)
+    
+    pos_dot = J1 @ nu[0:3]
+    att_dot = J2 @ nu[3:6]
+    
+    # Stack result [pos_dot, att_dot, acc]
+    return np.concatenate((pos_dot, att_dot, acc))
+
+def robot_plant_step_RK4(x_current, u_control, dt):
+    """
+    Simulates one time step using Runge-Kutta 4 (RK4).
+    Much more stable than Euler for Coriolis forces.
+    """
+    # RK4 Integration
+    k1 = get_x_dot(x_current, u_control)
+    k2 = get_x_dot(x_current + 0.5 * dt * k1, u_control)
+    k3 = get_x_dot(x_current + 0.5 * dt * k2, u_control)
+    k4 = get_x_dot(x_current + dt * k3, u_control)
+    
+    x_next = x_current + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+    
+    return x_next
 
 def robot_plant_step(x_current, u_control, dt):
     """
@@ -268,15 +452,31 @@ def robot_plant_step(x_current, u_control, dt):
     
     return x_next
 
-def get_linear_traj(start, end, steps, steps_done=0):
+def get_linear_traj(steps, dt, speed):
     """
     Generates a linear trajectory from start to end in given steps.
     """
-    traj = np.zeros((len(start), steps-steps_done))
-    for i in range(len(start)):
-        moving_start = (end[i] - start[i])/10
-        traj[i,:] = np.linspace(moving_start, end[i], steps-steps_done)
-    return traj
+    states = np.zeros((steps, 12))
+    
+    states[0,0] = 1.8
+    states[0,1] = -3
+    states[0,2] = -3.0
+
+    states[0,4] = 0.5  # Pitch
+    states[0,5] = 0.0  # Yaw
+    states[0,6] = speed
+
+    current_x, current_y = states[0, 0], states[0, 1]
+    dx = speed * np.cos(states[0,4]) * np.cos(states[0,5])
+    dy = speed * np.cos(states[0,4]) * np.sin(states[0,5])
+
+    for k in range(steps-1):
+        current_x += dx * dt
+        current_y += dy * dt
+        states[k+1, 0] = current_x
+        states[k+1, 1] = current_y
+        states[k+1, 2:11] = states[0, 2:11]
+    return states
 
 def generate_target_trajectory(steps, dt, speed):
     """
@@ -367,3 +567,58 @@ def generate_target_trajectory(steps, dt, speed):
 
     return states
 
+def get_error_avg_std(state_estimate, target_state, ref_state):
+    """
+    Calculates Mean Absolute Error (MAE) and Euclidean distance.
+    Arguments must be convertible to numpy arrays of shape (3, N).
+    """
+    # 1. Convert everything to consistent NumPy arrays (3, N)
+    #    Rows = x, y, z; Cols = Time steps
+    est = np.array(state_estimate) 
+    tgt = np.array(target_state)
+    ref = np.array(ref_state)
+
+    # Safety check for shapes
+    if est.shape != tgt.shape:
+        # Handle case where target might be transposed compared to estimate
+        if est.shape == tgt.T.shape:
+            tgt = tgt.T
+        else:
+            print(f"Shape mismatch! Est: {est.shape}, Tgt: {tgt.shape}")
+            return
+
+    # 2. Calculate Errors for TARGET
+    # Difference at every step
+    diff_matrix = est - tgt
+    
+    # A. Per-axis Mean Absolute Error (MAE)
+    # Average across time (axis 1)
+    mae_x, mae_y, mae_z = np.mean(np.abs(diff_matrix), axis=1)
+    
+    # B. 3D Euclidean Distance (Average tracking error)
+    # Norm at each step, then mean
+    dist_3d = np.linalg.norm(diff_matrix, axis=0)
+    avg_3d_dist = np.mean(dist_3d)
+
+    # 3. Calculate Errors for REFERENCE (Virtual Carrot)
+    diff_ref = est - ref
+    dist_ref_3d = np.linalg.norm(diff_ref, axis=0)
+    avg_ref_dist = np.mean(dist_ref_3d)
+
+    # 4. Print Results
+    print("-" * 30)
+    print(f"TRACKING PERFORMANCE:")
+    print(f"  Avg 3D Error: {avg_3d_dist:.4f} m")
+    print(f"  MAE X: {mae_x:.4f} m")
+    print(f"  MAE Y: {mae_y:.4f} m")
+    print(f"  MAE Z: {mae_z:.4f} m")
+    print(f"  Avg Dist from Ref: {avg_ref_dist:.4f} m")
+    print("-" * 30)
+
+    # Return dictionary for logging if needed
+    return {
+        'mae_x': mae_x,
+        'mae_y': mae_y,
+        'mae_z': mae_z,
+        'avg_3d': avg_3d_dist
+    }

@@ -52,7 +52,7 @@ def plot_TT_3d(ref_x, ref_y, ref_z,
                rov_x, rov_y, rov_z, 
                rov_roll, rov_pitch, rov_yaw,  # <--- NEW INPUTS (Radians)
                thrust_history, dt, 
-               arrow_stride=20, arrow_length=0.5): # <--- NEW VISUAL SETTINGS
+               arrow_stride=20, arrow_length=1.5): # <--- NEW VISUAL SETTINGS
     """
     ref_x, ref_y, ref_z: 1D arrays of the Target/Reference path
     rov_x, ... rov_yaw: 1D arrays of Actual ROV state (Angles in Radians!)
@@ -142,7 +142,6 @@ def plot_TT_3d(ref_x, ref_y, ref_z,
     ax2.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
     
     plt.tight_layout()
-    plt.show()
 
 
 def LOS_plot_dynamics(rov_x, rov_y, rov_z, target_data, dt, desired_dist=2.0):
@@ -185,7 +184,7 @@ def LOS_plot_dynamics(rov_x, rov_y, rov_z, target_data, dt, desired_dist=2.0):
     ax2 = fig.add_subplot(2, 2, 2)
     ax2.plot(time, p_target[:, 2], 'r--', label='Target Depth')
     ax2.plot(time, p_rov[:, 2], 'b-', label='ROV Depth')
-    ax2.invert_yaxis() # Depth is usually positive down, so we invert to make "surface" at top
+    #ax2.invert_yaxis() # Depth is usually positive down, so we invert to make "surface" at top
     ax2.set_title("2. Depth Profile (Z)")
     ax2.set_xlabel("Time [s]")
     ax2.set_ylabel("Depth [m]")

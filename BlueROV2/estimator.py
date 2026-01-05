@@ -63,18 +63,44 @@ class EKF():
         return self.x_est
 
     def measurement_update(self, measurement):
-        H = np.eye(self.n_states) # Direct measurement of all states
+        H = np.eye(self.n_states) 
+        
+        # Innovation
         y_k = measurement - H @ self.x_est
-
+        
+        # IMPORTANT: Handle angle wrapping for Yaw (Index 5)
         y_k[5] = (y_k[5] + np.pi) % (2 * np.pi) - np.pi
 
-        # Kalman Gain
+        # S = How much uncertainty total? (State P + Sensor R)
         S_k = H @ self.P_est @ H.T + self.R
+        
+        # We pass y_k (already wrapped) and S_k (includes R)
+        if self.check_outlier(y_k, S_k, threshold=16.8): # Threshold for ~12 DOF
+            # REJECT: Return the predicted state as-is
+            print("Outlier rejected")
+            return self.x_est
+
+        # Calculate Kalman Gain
         K_k = self.P_est @ H.T @ np.linalg.inv(S_k)
-        # Update State Estimate
+        
+        # Update State
         self.x_est = self.x_est + K_k @ y_k
-        # Update Covariance Estimate
+        
+        # Update Covariance # Search Joseph form as it should be more stable
         I = np.eye(self.n_states)
         self.P_est = (I - K_k @ H) @ self.P_est
-        
+
         return self.x_est
+    
+    def check_outlier(self, y_k, S_k, threshold):
+        # Calculate Mahalanobis Distance squared: d^2 = y^T * S^-1 * y
+        # To add in EKF LaTeX notes
+        d_squared = y_k.T @ np.linalg.inv(S_k) @ y_k
+        
+        if d_squared > threshold:
+            return True  # Is Outlier
+        return False     # Is Safe
+    
+# Will add asyncronous update and predict calls later
+# will switcht to quaternions if needed
+# Tackle the H Matrix reality: currently,assuming measurement always has 12 items, but the GPS will likely only give 2 or 3 items, and Depth sensor only 1).

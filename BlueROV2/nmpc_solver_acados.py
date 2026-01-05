@@ -56,7 +56,13 @@ class Acados_Solver_Wrapper:
         self.ocp.solver_options.tf = MPCC.T_s * MPCC.N
         self.ocp.solver_options.qp_solver = 'PARTIAL_CONDENSING_HPIPM'
         self.ocp.solver_options.hessian_approx = 'GAUSS_NEWTON'
-        self.ocp.solver_options.integrator_type = 'ERK'
+        self.ocp.solver_options.integrator_type = 'ERK' 
+
+        # Set IRK stages (4 is standard for accuracy/stability)
+        #self.ocp.solver_options.sim_method_num_stages = 4 
+        # Integration steps per shooting interval (Increase to 2 or 3 if still unstable)
+        #self.ocp.solver_options.sim_method_num_steps = 3
+
         self.ocp.solver_options.nlp_solver_type = 'SQP_RTI'
 
         # 6. Generate
@@ -74,8 +80,11 @@ class Acados_Solver_Wrapper:
         # Using as terminal cost yref, be careful
         self.solver.set(MPCC.N, "yref", target_state)
 
+        for i in range(MPCC.N + 1):
+            self.solver.set(i, "x", x0)
         # Solve
         status = self.solver.solve()
-        
+        if status != 0 :
+            print(f"Acados NMPC solver returned status {status}!")
         # Return first control
         return self.solver.get(0, "u")

@@ -7,7 +7,7 @@ import casadi as cas
 
 from nmpc_solver_acados import Acados_Solver_Wrapper
 from nmpc_params import NMPC_params as MPCC
-from utils import get_linear_traj, robot_plant_step, generate_target_trajectory, get_standoff_reference
+from utils import utils
 from plotters import LOS_plot_dynamics, plot_double_target_3d, plot_TT_3d, LOS_plot_camera_fov
 def simulation():
     # Initialize the new Acados solver
@@ -40,32 +40,40 @@ def simulation():
 
     EKFtraj_x, EKFtraj_y, EKFtraj_z = [], [], []
     EKFtraj_phi, EKFtraj_theta, EKFtraj_psi = [], [], []
+
+    ref_x, ref_y, ref_z = [], [], []
+
     thrust_history = []   
     t_simulation = 50 #sec
     steps_tot = int(t_simulation /  MPCC.T_s)
 
     # Assuming that this is the data we get from our ideal camera system
     state_target = state_target_1
-    state_moving = generate_target_trajectory(steps_tot, MPCC.T_s, speed=0.9)
+    state_moving = utils.generate_target_trajectory(steps_tot, MPCC.T_s, speed=0.9)
     t0 = time.time()
 
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
     round = 4
-    
+    if round == 3:
+        state_moving = utils.get_linear_traj(steps_tot, MPCC.T_s, speed=0.9)
+    elif round == 4:
+        state_moving = utils.generate_target_trajectory(steps_tot, MPCC.T_s, speed=0.9)
     ekf = EKF()
     state_estimate = np.copy(state_now)
     noise_ekf = np.random.normal(0, [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
     testing_EKF = False
     is_there_noise = False
-    if round ==4:
+    if round > 2:
         for i in range(steps_tot): 
             # Solve
             current_target = state_moving[i,:]
-            ref_guidance = get_standoff_reference(state_estimate, current_target, desired_dist=1.5, lookahead=1.0)
+            ref_guidance = utils.get_standoff_reference(state_estimate, current_target, desired_dist=2.0, lookahead=1.0, time_predict=1.5)
             u_optimal = solver.solve(state_estimate, ref_guidance)
             # Plant Step [Imagine this as GPS]
-            state_now = robot_plant_step(state_now, u_optimal, MPCC.T_s)
-
+            state_now = utils.robot_plant_step_RK4(state_now, u_optimal, MPCC.T_s)
+            if np.any(np.abs(state_now[6:12]) > 20.0): # Velocity > is impossible
+                print("Plant exploded! Simulation unstable.")
+                break
             if testing_EKF:
                 # EKF:
                 if is_there_noise:
@@ -98,13 +106,17 @@ def simulation():
             EKFtraj_theta.append(state_estimate[4]) # Pitch
             EKFtraj_psi.append(state_estimate[5])   # Yaw
 
+            ref_x.append(ref_guidance[0])
+            ref_y.append(ref_guidance[1])
+            ref_z.append(ref_guidance[2])
+
     elif round == 3:
         for i in range(steps_tot): 
             # Solve
             u_optimal = solver.solve(state_now, state_moving[i,:])
             
             # Plant Step
-            state_now = robot_plant_step(state_now, u_optimal, MPCC.T_s)
+            state_now = utils.robot_plant_step(state_now, u_optimal, MPCC.T_s)
 
             traj_x.append(state_now[0])
             traj_y.append(state_now[1])
@@ -119,7 +131,7 @@ def simulation():
             u_optimal = solver.solve(state_now, state_target)
             
             # Plant Step
-            state_now = robot_plant_step(state_now, u_optimal, MPCC.T_s)
+            state_now = utils.robot_plant_step(state_now, u_optimal, MPCC.T_s)
 
             traj_x.append(state_now[0])
             traj_y.append(state_now[1])
@@ -147,23 +159,22 @@ def simulation():
     
     print("Plotting results...")
     thrust_history = np.array(thrust_history)
-    if round == 3:
+    if round <3:   
+        plot_double_target_3d(np.array(traj_x), np.array(traj_y), np.array(traj_z), state_target_1, state_target_2, thrust_history)
+    elif round >= 3:
         plot_TT_3d(
                     state_moving[:,0], state_moving[:,1], state_moving[:,2], # Reference
                     np.array(traj_x), np.array(traj_y), np.array(traj_z),    # ROV Position
                     np.array(traj_phi), np.array(traj_theta), np.array(traj_psi), # ROV Angles
                     thrust_history, MPCC.T_s
                 )
-    elif round <3:   
-        plot_double_target_3d(np.array(traj_x), np.array(traj_y), np.array(traj_z), state_target_1, state_target_2, thrust_history)
-    elif round ==4:
         LOS_plot_dynamics(traj_x, traj_y, traj_z, state_moving, MPCC.T_s, desired_dist=2.0)
 
         if testing_EKF:
             LOS_plot_dynamics(EKFtraj_x, EKFtraj_y, EKFtraj_z, state_moving, MPCC.T_s, desired_dist=2.0)
             
         LOS_plot_camera_fov(traj_x, traj_y, traj_z, traj_psi, traj_theta, state_moving, MPCC.T_s)
-
+        utils.get_error_avg_std([traj_x, traj_y, traj_z], state_moving[:,:3].T, [ref_x, ref_y, ref_z])
         plt.show()
 
 

@@ -51,7 +51,10 @@ def export_bluerov_model():
     D_total = D_lin + D_quad
     
     # force sum (Ignoring Coriolis?)
-    forces_sum = tau - cas.mtimes(D_total, nu) - g_vec
+    coriolis_matrix = utils.get_C_SX(nu)
+    forces_sum = tau - cas.mtimes((D_total), nu) - g_vec
+
+    forces_sum = tau - cas.mtimes((D_total+coriolis_matrix), nu) - g_vec
     nu_dot = cas.mtimes(M_inv, forces_sum)
 
     J1 = utils.get_J1(phi, theta, psi) # Ensure utils returns SX compatible logic
