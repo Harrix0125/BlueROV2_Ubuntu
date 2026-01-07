@@ -141,6 +141,63 @@ def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=
     # Rest are zero
     return ref_state
 
+def get_shadow_ref(rov_state, target_state, target_vel = None, desired_dist = 2.0):
+    """
+    Calculates the 'Ideal State' (Shadow) for the NMPC to track.
+    Not using Finite derivative as amplifies noise
+    Not using LPF as introduces lag: takes 0.5sec to realize the movement
+    Not using Particle Filter as is an "overkill" 
+    """
+    p_rov = rov_state[0:3]
+    psi_rov = rov_state[5]
+
+    p_target = target_state[0:3]
+
+    v_target_global = target_vel if target_vel is not None else np.zeros(3)
+
+    error_vector = p_rov - p_target
+    dist_3d = np.linalg.norm(error_vector)
+
+    if dist_3d < 0.01:
+        direction_vect = np.array([-1.0, 0.0, 0.0])  # Default direction
+    else:
+        direction_vect = error_vector / dist_3d
+
+    p_reference = p_target + direction_vect * desired_dist
+
+    # Ideal velocity:
+    v_ref_global = v_target_global
+
+    # Defining orientation with ROV facing the target:
+    target_pointing_vector = p_target - p_reference
+    yaw_des = np.arctan2(target_pointing_vector[1], target_pointing_vector[0])
+
+    dist_plane = np.linalg.norm(target_pointing_vector[0:2])
+    pitch_des = np.arctan2(-target_pointing_vector[2], dist_plane)
+
+    # Transforming to body frame:
+    c_psi = np.cos(yaw_des)
+    s_psi = np.sin(yaw_des)
+
+    u_ref = v_ref_global[0] * c_psi + v_ref_global[1] * s_psi
+    v_ref = -v_ref_global[0] * s_psi + v_ref_global[1] * c_psi
+    w_ref = v_ref_global[2]
+    # Build the Reference State Vector (12,)
+    # [x, y, z, phi, theta, psi, u, v, w, p, q, r]
+    ref_state = np.zeros(12)
+    ref_state[0] = p_reference[0]
+    ref_state[1] = p_reference[1]
+    ref_state[2] = p_reference[2]
+    ref_state[3] = 0  # Roll 0
+    ref_state[4] = pitch_des
+    ref_state[5] = yaw_des  # DESIRED HEADING
+    ref_state[6] = u_ref   # DESIRED SURGE
+    ref_state[7] = v_ref   # DESIRED SWAY
+    ref_state[8] = w_ref   # Desired Heave 
+
+    return ref_state
+
+
 def get_J1(phi, theta, psi):
     """Calculates Rotation Matrix (Body -> World) for kinematics"""
     cphi, sphi = np.cos(phi), np.sin(phi)

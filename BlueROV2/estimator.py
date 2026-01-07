@@ -75,7 +75,7 @@ class EKF():
         S_k = H @ self.P_est @ H.T + self.R
         
         # We pass y_k (already wrapped) and S_k (includes R)
-        if self.check_outlier(y_k, S_k, threshold=16.8): # Threshold for ~12 DOF
+        if self.check_outlier(y_k, S_k, threshold=26.2): # Threshold for ~12 DOF
             # REJECT: Return the predicted state as-is
             print("Outlier rejected")
             return self.x_est

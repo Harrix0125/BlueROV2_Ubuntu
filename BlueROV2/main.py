@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import time
 from mpl_toolkits.mplot3d import Axes3D
 from estimator import EKF
+from target_estimator import TargetTrackerKF
 import casadi as cas
 
 from nmpc_solver_acados import Acados_Solver_Wrapper
@@ -18,6 +19,7 @@ def simulation():
 
     state_now = np.zeros(12)
     state_now[2] = -2
+    state_now[6] = -1 / (MPCC.R_THRUST * 1200)
 
     state_target = np.zeros(12)
 
@@ -53,22 +55,38 @@ def simulation():
     t0 = time.time()
 
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
-    round = 4
+    round = 3
     if round == 3:
         state_moving = utils.get_linear_traj(steps_tot, MPCC.T_s, speed=0.9)
     elif round == 4:
         state_moving = utils.generate_target_trajectory(steps_tot, MPCC.T_s, speed=0.9)
+    
     ekf = EKF()
-    state_estimate = np.copy(state_now)
+    target_kf = TargetTrackerKF(dt_default=MPCC.T_s, process_noise=0.1, measure_noise=0.1)
+    state_est = np.copy(state_now)
     noise_ekf = np.random.normal(0, [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
-    testing_EKF = False
+
+    testing_EKF = True
     is_there_noise = False
     if round > 2:
         for i in range(steps_tot): 
             # Solve
-            current_target = state_moving[i,:]
-            ref_guidance = utils.get_standoff_reference(state_estimate, current_target, desired_dist=2.0, lookahead=1.0, time_predict=1.5)
-            u_optimal = solver.solve(state_estimate, ref_guidance)
+            if testing_EKF:
+                true_target_pos = state_moving[i,0:3]
+                camera_noise = np.random.normal(0, 0.1, 3) if is_there_noise else np.array([0.0, 0.0, 0.0])
+                measured_target_pos = true_target_pos + camera_noise
+
+                # Target KF Update
+                target_kf.predict(dt = MPCC.T_s)
+                target_kf.update(measured_target_pos)
+                est_target_pos = target_kf.get_state()[0:3]
+                est_target_vel = target_kf.get_state()[3:6]
+                ref_guidance = utils.get_shadow_ref(state_est, est_target_pos, est_target_vel, desired_dist=2.0)
+            else:
+                current_target = state_moving[i,:]
+                ref_guidance = utils.get_standoff_reference(state_est, current_target, desired_dist=2.0, lookahead=1.0, time_predict=1.5)
+            
+            u_optimal = solver.solve(state_est, ref_guidance)
             # Plant Step [Imagine this as GPS]
             state_now = utils.robot_plant_step_RK4(state_now, u_optimal, MPCC.T_s)
             if np.any(np.abs(state_now[6:12]) > 20.0): # Velocity > is impossible
@@ -77,16 +95,16 @@ def simulation():
             if testing_EKF:
                 # EKF:
                 if is_there_noise:
-                    noise_ekf = np.random.normal(0, [0.05, 0.05, 0.05, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
+                    noise_ekf = np.random.normal(0, [0.10, 0.10, 0.05, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
                 else:
                     noise_ekf = np.random.normal(0, [0.0]*12)
                 measured_state = state_now + noise_ekf
                 # Updates EKF P and state estimate
                 ekf.predict(u_optimal)
                 # Gets new state estimate with K gain
-                state_estimate = ekf.measurement_update(measured_state)
+                state_est = ekf.measurement_update(measured_state)
             else:
-                state_estimate = np.copy(state_now)
+                state_est = np.copy(state_now)
             
 
 
@@ -99,12 +117,12 @@ def simulation():
             traj_psi.append(state_now[5])   # Yaw
             thrust_history.append(u_optimal)
             
-            EKFtraj_x.append(state_estimate[0])
-            EKFtraj_y.append(state_estimate[1])
-            EKFtraj_z.append(state_estimate[2])
-            EKFtraj_phi.append(state_estimate[3])   # Roll
-            EKFtraj_theta.append(state_estimate[4]) # Pitch
-            EKFtraj_psi.append(state_estimate[5])   # Yaw
+            EKFtraj_x.append(state_est[0])
+            EKFtraj_y.append(state_est[1])
+            EKFtraj_z.append(state_est[2])
+            EKFtraj_phi.append(state_est[3])   # Roll
+            EKFtraj_theta.append(state_est[4]) # Pitch
+            EKFtraj_psi.append(state_est[5])   # Yaw
 
             ref_x.append(ref_guidance[0])
             ref_y.append(ref_guidance[1])

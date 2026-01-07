@@ -93,25 +93,25 @@ class NMPC_params:
     
     # Tuning Weights
     # Position Errors [x, y, z, phi, theta, psi]
-    pos_coef = 10
-    z_coef = 20
-    angle_coef = 10
-    pitch_coef = 10
-    psi_coef = 20
+    pos_coef = 50
+    z_coef = pos_coef * 1.5
+    angle_coef = 1
+    pitch_coef = 80
+    psi_coef = 4
     Q_POS = [pos_coef, pos_coef, z_coef, angle_coef, pitch_coef, psi_coef] 
     
     # Velocity Errors [u, v, w, p, q, r]
-    vel_coef = 0.8
+    vel_coef = 1
     angV_coef = 0.8
-    Q_VEL = [2, vel_coef, vel_coef, angV_coef, angV_coef, 2]
+    Q_VEL = [vel_coef, vel_coef, vel_coef, angV_coef, angV_coef, angV_coef]
     
     # Control Effort (Minimize energy)
-    R_THRUST = 0.015
+    R_THRUST = 0.001
     Q_diag = Q_POS + Q_VEL
     Q = cas.diag(Q_diag)
 
     #   Weights at time = N
-    pos_N = 350.0
+    pos_N = 500.0
     angle_N = 1.0
     Q_POS_N = [pos_N, pos_N, pos_N, angle_N, angle_N, angle_N] 
 
