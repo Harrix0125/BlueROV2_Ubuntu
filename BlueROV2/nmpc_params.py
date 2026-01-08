@@ -2,7 +2,7 @@ import numpy as np
 import casadi as cas
 
 class NMPC_params:
-    N = 170          # Prediction horizon (steps)
+    N = 180          # Prediction horizon (steps)
     T_s = 0.05      # Time step (seconds) - 20Hz is standard for underwater
     
     m = 11.5            # mass [kg]
@@ -90,33 +90,34 @@ class NMPC_params:
 
     THRUST_MIN = -30.0
     THRUST_MAX = 30.0
+    DELTA_THRUST_LIMIT = THRUST_MAX * T_s * 2
     
     # Tuning Weights
     # Position Errors [x, y, z, phi, theta, psi]
-    pos_coef = 50
+    pos_coef = 5
     z_coef = pos_coef * 1.5
     angle_coef = 1
-    pitch_coef = 80
-    psi_coef = 4
+    pitch_coef = 40
+    psi_coef = 40
     Q_POS = [pos_coef, pos_coef, z_coef, angle_coef, pitch_coef, psi_coef] 
     
     # Velocity Errors [u, v, w, p, q, r]
-    vel_coef = 1
-    angV_coef = 0.8
+    vel_coef =1
+    angV_coef = 1
     Q_VEL = [vel_coef, vel_coef, vel_coef, angV_coef, angV_coef, angV_coef]
     
-    # Control Effort (Minimize energy)
-    R_THRUST = 0.001
+    # Control Effort to minimize thruster usage: if too low it goes crazy and rotates
+    R_THRUST = 0.01
     Q_diag = Q_POS + Q_VEL
     Q = cas.diag(Q_diag)
 
     #   Weights at time = N
-    pos_N = 500.0
-    angle_N = 1.0
+    pos_N = 100.0
+    angle_N = 40.0
     Q_POS_N = [pos_N, pos_N, pos_N, angle_N, angle_N, angle_N] 
 
-    vel_N = 1
-    angV_N = 1
+    vel_N = 10
+    angV_N = 1.0
     Q_VEL_N = [vel_N, vel_N, vel_N, angV_N, angV_N, angV_N]
     Q_diag_N = Q_POS_N + Q_VEL_N
     Q_N = cas.diag(Q_diag_N)

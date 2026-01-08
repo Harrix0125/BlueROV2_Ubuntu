@@ -4,67 +4,6 @@ import matplotlib.pyplot as plt
 from nmpc_params import NMPC_params as MPCC
 import utils as utils
 
-def get_error_dynamics(model, target_state):
-    """
-    model: The AcadosModel object you created (to access model.x)
-    target_state: Symbolic variable (SX) for the target's state [x, y, z, phi, theta, psi, u, v, w, p, q, r]
-    """
-    
-    # 1. Unpack ROV State (from model.x)
-    # Positions (not needed for rotation, but needed for error calc)
-    p_rov = model.x[0:3]
-    # Attitudes (phi, theta, psi)
-    eta_rov = model.x[3:6]
-    # Velocities (u, v, w)
-    nu_rov = model.x[6:9] 
-    
-    # 2. Unpack Target State (passed as an argument or parameter)
-    p_target = target_state[0:3]
-    eta_target = target_state[3:6] # [phi_t, theta_t, psi_t]
-    nu_target = target_state[6:9]  # [u_t, v_t, w_t]
-    omega_target = target_state[9:12] # [p_t, q_t, r_t] Angular velocities
-    
-    # 3. Get Rotation Matrices using YOUR utils function
-    # R_rov: Rotates ROV Body -> World
-    R_rov = utils.get_J1(eta_rov[0], eta_rov[1], eta_rov[2])
-    
-    # R_t: Rotates Target Body -> World
-    R_t = utils.get_J1(eta_target[0], eta_target[1], eta_target[2])
-    
-    # 4. Calculate Position Error in Target Frame
-    # epsilon = R_t.T * (p_rov - p_target)
-    p_error_global = p_rov - p_target
-    epsilon = cas.mtimes(R_t.T, p_error_global)
-
-    # 5. Define Skew-Symmetric Matrix for Target Angular Velocity (S(w))
-    # This is needed for the rotational derivative part: -S(w) * epsilon
-    S_omega = cas.SX.zeros(3, 3)
-    S_omega[0, 1] = -omega_target[2] # -r
-    S_omega[0, 2] =  omega_target[1] #  q
-    S_omega[1, 0] =  omega_target[2] #  r
-    S_omega[1, 2] = -omega_target[0] # -p
-    S_omega[2, 0] = -omega_target[1] # -q
-    S_omega[2, 1] =  omega_target[0] #  p
-
-    # 6. Calculate Error Dynamics (epsilon_dot)
-    # eq: dot_epsilon = -S(w)*epsilon + (R_t.T * R_rov * nu_rov) - nu_target
-    
-    # Term 1: Rotation effect due to target turning
-    term_1 = -cas.mtimes(S_omega, epsilon)
-    
-    # Term 2: Velocity difference projected into Target Frame
-    # R_rel = R_t^T * R_rov
-    R_rel = cas.mtimes(R_t.T, R_rov) 
-    
-    # Velocity of ROV seen in Target Frame
-    v_rov_in_target_frame = cas.mtimes(R_rel, nu_rov)
-    
-    term_2 = v_rov_in_target_frame - nu_target
-    
-    epsilon_dot = term_1 + term_2
-    
-    return epsilon, epsilon_dot
-
 def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=1.0, time_predict=1.8):
     """
     Calculates a 'Virtual Reference' for the NMPC to track.
@@ -121,9 +60,9 @@ def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=
     z_ref = z_r + (z_speed * time_predict)
     # But to maintain depth relative to target, we can also do:
 
-    # Build the Reference State Vector (12,)
+    # Build the Reference State Vector (20,)
     # [x, y, z, phi, theta, psi, u, v, w, p, q, r]
-    ref_state = np.zeros(12)
+    ref_state = np.zeros(20)
     ref_state[0] = x_ref
     ref_state[1] = y_ref
     ref_state[2] = target_state[2] # Match target depth
@@ -182,9 +121,9 @@ def get_shadow_ref(rov_state, target_state, target_vel = None, desired_dist = 2.
     u_ref = v_ref_global[0] * c_psi + v_ref_global[1] * s_psi
     v_ref = -v_ref_global[0] * s_psi + v_ref_global[1] * c_psi
     w_ref = v_ref_global[2]
-    # Build the Reference State Vector (12,)
+    # Build the Reference State Vector (20,)
     # [x, y, z, phi, theta, psi, u, v, w, p, q, r]
-    ref_state = np.zeros(12)
+    ref_state = np.zeros(20)
     ref_state[0] = p_reference[0]
     ref_state[1] = p_reference[1]
     ref_state[2] = p_reference[2]
@@ -384,7 +323,6 @@ def get_C_np(nu):
     coriolis_sum = C_rb + C_a
 
     return coriolis_sum
-
 def get_x_dot(x_state, u_control):
     """
     Calculates x_dot = f(x, u) using purely Numpy math.
@@ -514,7 +452,7 @@ def get_linear_traj(steps, dt, speed):
     """
     Generates a linear trajectory from start to end in given steps.
     """
-    states = np.zeros((steps, 12))
+    states = np.zeros((steps, 20))
     
     states[0,0] = 1.8
     states[0,1] = -3
@@ -548,15 +486,15 @@ def generate_target_trajectory(steps, dt, speed):
     # Col 3-5: Angle (phi, theta, psi)
     # Col 6-8: LinVel Body (u, v, w)
     # Col 9-11: AngVel Body (p, q, r)
-    states = np.zeros((steps, 12))
+    states = np.zeros((steps, 20))
     
     # Initial Conditions
-    states[0,0] = 0
-    states[0,1] = -6
-    states[0,2] = -2.0
+    states[0,0] = 1.8
+    states[0,1] = -3
+    states[0,2] = -3.0
 
     states[0,4] = 0.5  # Pitch
-    states[0,5] = 0.36  # Yaw
+    states[0,5] = 0.0  # Yaw
     # Simulation Variables
     current_x, current_y, current_z = states[0, 0], states[0, 1], states[0, 2]
     current_psi = states[0, 5]  # Yaw

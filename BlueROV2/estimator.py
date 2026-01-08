@@ -8,7 +8,7 @@ class EKF():
         self.dt = MPCC.T_s
         self.n_states = 12
         self.n_controls = 8
-        
+        self.initialized = False
         # 1. Setup CasADi Functions for EKF
         self._setup_casadi_functions()
         
@@ -16,7 +16,7 @@ class EKF():
         # Q: Process Noise (Trust in physics model)
         #    High Q = Physics is uncertain, rely more on sensors
         #    Low Q = Physics is perfect, ignore noisy sensors
-        q_diag = [0.01]*3 + [0.01]*3 + [0.1]*3 + [0.1]*3 # Pos, Att, Vel, Rates
+        q_diag = [0.05]*3 + [0.05]*3 + [0.5]*3 + [0.5]*3 # Pos, Att, Vel, Rates
         self.Q = np.diag(q_diag)
 
         # R: Measurement Noise (Trust in sensors)
@@ -29,7 +29,7 @@ class EKF():
         
         # 3. Initial State & Covariance
         self.x_est = np.zeros(self.n_states)
-        self.P_est = np.eye(self.n_states) * 1.0 # High initial uncertainty
+        self.P_est = np.eye(self.n_states)*2
 
     def _setup_casadi_functions(self):
         acados_model = export_bluerov_model()
@@ -63,6 +63,12 @@ class EKF():
         return self.x_est
 
     def measurement_update(self, measurement):
+        if not self.initialized:
+            self.x_est = measurement
+            self.initialized = True
+            print("EKF Initialized")
+            return self.x_est
+
         H = np.eye(self.n_states) 
         
         # Innovation
@@ -98,6 +104,7 @@ class EKF():
         d_squared = y_k.T @ np.linalg.inv(S_k) @ y_k
         
         if d_squared > threshold:
+            print("Outlier detected with d^2 =", d_squared)
             return True  # Is Outlier
         return False     # Is Safe
     

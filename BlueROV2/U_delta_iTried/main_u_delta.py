@@ -3,12 +3,13 @@ import matplotlib.pyplot as plt
 import time
 from mpl_toolkits.mplot3d import Axes3D
 from estimator import EKF
-from target_estimator import TargetTrackerKF, VisualTarget
+from target_estimator import TargetTrackerKF
 import casadi as cas
 
-from nmpc_solver_acados import Acados_Solver_Wrapper
+from nmpc_solver_acados_u_delta import Acados_Solver_Wrapper
 from nmpc_params import NMPC_params as MPCC
 from utils import utils
+import utils_u_delta
 from plotters import LOS_plot_dynamics, plot_double_target_3d, plot_TT_3d, LOS_plot_camera_fov
 def simulation():
     # Initialize the new Acados solver
@@ -17,19 +18,19 @@ def simulation():
     solver = Acados_Solver_Wrapper()
     print("Compilation Complete.")
 
-    state_now = np.zeros(12)
+    state_now = np.zeros(20)
     state_now[2] = -2
-    #state_now[6] = -1 / (MPCC.R_THRUST * 1200)
+    state_now[6] = -1 / (MPCC.R_THRUST * 1200)
 
-    state_target = np.zeros(12)
+    state_target = np.zeros(20)
 
-    state_target_1 = np.zeros(12)
+    state_target_1 = np.zeros(20)
     state_target_1[0] = 2.0
     state_target_1[1] = -2.0
     state_target_1[2] = -5
     state_target_1[5] = 0
 
-    state_target_2 = np.zeros(12)
+    state_target_2 = np.zeros(20)
     state_target_2[0] = -4.0
     state_target_2[1] = -5.0
     state_target_2[2] = -2.0
@@ -45,96 +46,72 @@ def simulation():
 
     ref_x, ref_y, ref_z = [], [], []
 
-    thrust_history = [] 
-    u_previous = np.zeros(8)
-    MAX_DELTA = MPCC.THRUST_MAX * MPCC.T_s * 2
-
-    t_simulation = 30 #sec
+    thrust_history = []   
+    t_simulation = 50 #sec
     steps_tot = int(t_simulation /  MPCC.T_s)
 
     # Assuming that this is the data we get from our ideal camera system
     state_target = state_target_1
-    state_moving = utils.generate_target_trajectory(steps_tot, MPCC.T_s, speed=0.9)
+    state_moving = utils_u_delta.generate_target_trajectory(steps_tot, MPCC.T_s, speed=0.9)
     t0 = time.time()
 
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
     round = 4
     if round == 3:
-        state_moving = utils.get_linear_traj(steps_tot, MPCC.T_s, speed=0.9)
+        state_moving = utils_u_delta.get_linear_traj(steps_tot, MPCC.T_s, speed=0.9)
     elif round == 4:
-        state_moving = utils.generate_target_trajectory(steps_tot, MPCC.T_s, speed=0.9)
+        state_moving = utils_u_delta.generate_target_trajectory(steps_tot, MPCC.T_s, speed=0.9)
 
-    #EKF Setup
     ekf = EKF()
-    ekf.x_est = np.copy(state_now)
-    state_est = np.copy(state_now)
-    noise_ekf = np.random.normal(0, [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
-    testing_EKF = True
-    is_there_noise = False
-    noise_ekf = np.random.normal(0, [0.10, 0.10, 0.05, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]) if is_there_noise else np.array([0.0]*12)    
-    print("noise_ekf:", noise_ekf)
-    # Camera Model Setup
-    camera_data = VisualTarget(start_state=state_moving[0,:], fov_h=90, fov_v=80, max_dist=10)
-    camera_noise = np.random.normal(0, 0.1, 3) if is_there_noise else np.array([0.0]*3)
-    seen_it_once = False
+    target_kf = TargetTrackerKF(dt_default=MPCC.T_s, process_noise=0.1, measure_noise=0.1)
+    state_est= np.copy(state_now)
 
+    noise_ekf = np.random.normal(0, [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
+
+    testing_EKF = False
+    is_there_noise = False
     if round > 2:
         for i in range(steps_tot): 
-            camera_data.truth_update(state_moving[i,0:6])
+            # Solve
+            if testing_EKF:
+                true_target_pos = state_moving[i,0:3]
+                camera_noise = np.random.normal(0, 0.1, 3) if is_there_noise else np.array([0.0, 0.0, 0.0])
+                measured_target_pos = true_target_pos + camera_noise
 
-            is_visible = camera_data.check_visibility(state_est)
-            if is_visible:
-                seen_it_once = True
-
-                # Update target estimate from camera and get state
-                est_target = camera_data.get_camera_estimate(state_est, dt = MPCC.T_s, camera_noise = camera_noise)
-                est_target_pos = est_target[0:3]
-                est_target_vel = est_target[3:6]
-
-                # Get guidance reference
-                ref_guidance = utils.get_shadow_ref(state_est, est_target_pos, est_target_vel, desired_dist=3.0)
-
-            elif not is_visible and seen_it_once:
-
-                # Visible before but not now: use last seen position
-                est_target = camera_data.get_camera_estimate(state_est, dt = MPCC.T_s, camera_noise = camera_noise)
-                est_target_pos = est_target[0:3]
-                est_target_vel = est_target[3:6]
-
-                # Get imaginary reference based on last seen position
-                ref_guidance = utils.get_shadow_ref(state_est, est_target_pos, est_target_vel, desired_dist=4.0)
-                if camera_data.last_seen_t > 5.0:
-                    # If not seen for more than 5 seconds, just stay still
-                    ref_guidance = state_est[0:12]
-                    ref_guidance[6:12] = 0.0
-                    ref_guidance[4] = 0 
-                    seen_it_once = False
+                # Target KF Update
+                target_kf.predict(dt = MPCC.T_s)
+                target_kf.update(measured_target_pos)
+                est_target_pos = target_kf.get_state()[0:3]
+                est_target_vel = target_kf.get_state()[3:6]
+                ref_guidance = utils_u_delta.get_shadow_ref(state_est, est_target_pos, est_target_vel, desired_dist=2.0)
             else:
-                # Not visible and never seen: stay still till i see something
-                ref_guidance = state_est[0:12]
+                current_target = state_moving[i,:]
+                ref_guidance = utils_u_delta.get_standoff_reference(state_est, current_target, desired_dist=2.0, lookahead=1.0, time_predict=1.5)
             
-            # Solve NMPC
-            u_optimal = solver.solve(state_est, ref_guidance)
-            u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
-            u_previous = u_optimal    
-
+            u_delta = solver.solve(state_est[0:12],state_est[12:20], ref_guidance[0:12])
             # Plant Step [Imagine this as GPS]
-            state_now = utils.robot_plant_step_RK4(state_now, u_optimal, MPCC.T_s)
-            
+            u_optimal = state_est[12:20] + u_delta
 
+            state_now[0:12] = utils.robot_plant_step_RK4(state_now[0:12], u_optimal, MPCC.T_s)
+            if np.any(np.abs(state_now[6:12]) > 20.0): # Velocity > is impossible
+                print("Plant exploded! Simulation unstable.")
+                break
             if testing_EKF:
                 # EKF:
                 if is_there_noise:
                     noise_ekf = np.random.normal(0, [0.10, 0.10, 0.05, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
                 else:
                     noise_ekf = np.random.normal(0, [0.0]*12)
-                measured_state = state_now + noise_ekf
+                measured_state = state_now[0:12] + noise_ekf
                 # Updates EKF P and state estimate
                 ekf.predict(u_optimal)
                 # Gets new state estimate with K gain
-                state_est = ekf.measurement_update(measured_state)
+                state_est[0:12] = ekf.measurement_update(measured_state)
             else:
                 state_est = np.copy(state_now)
+            
+            state_est[12:20] = u_optimal  # Update for next iteration
+            
             
 
 
@@ -160,12 +137,13 @@ def simulation():
 
     elif round == 3:
         for i in range(steps_tot): 
-            # Solve
-            u_optimal = solver.solve(state_now, state_moving[i,:])
-            u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
-            u_previous = u_optimal
+            u_delta = solver.solve(state_now[0:12], state_est[12:20],state_moving[i,0:12])
+            # Plant Step [Imagine this as GPS]
+            u_optimal = state_est[12:20] + u_delta
+            state_est[12:20] = u_optimal  # Update for next iteration
+
             # Plant Step
-            state_now = utils.robot_plant_step(state_now, u_optimal, MPCC.T_s)
+            state_now[0:12] = utils.robot_plant_step(state_now[0:12], u_optimal, MPCC.T_s)
 
             traj_x.append(state_now[0])
             traj_y.append(state_now[1])
@@ -178,8 +156,7 @@ def simulation():
         for i in range(steps_tot): 
             # Solve
             u_optimal = solver.solve(state_now, state_target)
-            u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
-            u_previous = u_optimal
+            
             # Plant Step
             state_now = utils.robot_plant_step(state_now, u_optimal, MPCC.T_s)
 
@@ -218,24 +195,16 @@ def simulation():
                     np.array(traj_phi), np.array(traj_theta), np.array(traj_psi), # ROV Angles
                     thrust_history, MPCC.T_s
                 )
-        LOS_plot_dynamics(traj_x, traj_y, traj_z, state_moving, MPCC.T_s, desired_dist=2.0)
+        LOS_plot_dynamics(traj_x, traj_y, traj_z, state_moving[0:12], MPCC.T_s, desired_dist=2.0)
 
         if testing_EKF:
-            LOS_plot_dynamics(EKFtraj_x, EKFtraj_y, EKFtraj_z, state_moving, MPCC.T_s, desired_dist=2.0)
+            LOS_plot_dynamics(EKFtraj_x, EKFtraj_y, EKFtraj_z, state_moving[0:12], MPCC.T_s, desired_dist=2.0)
             
-        LOS_plot_camera_fov(traj_x, traj_y, traj_z, traj_psi, traj_theta, state_moving, MPCC.T_s)
+        LOS_plot_camera_fov(traj_x, traj_y, traj_z, traj_psi, traj_theta, state_moving[0:12], MPCC.T_s)
         utils.get_error_avg_std([traj_x, traj_y, traj_z], state_moving[:,:3].T, [ref_x, ref_y, ref_z])
         plt.show()
 
-def cap_input(u_previous, u_optimal, MAX_DELTA = 35.0):
-    u_output = np.zeros(len(u_optimal))
-    for i in range(len(u_optimal)):
-        if u_optimal[i] >= u_previous[i] + MAX_DELTA:
-            u_output[i] = u_previous[i] + MAX_DELTA
-        elif u_optimal[i] <= u_previous[i] - MAX_DELTA:
-            u_output[i] = u_previous[i] - MAX_DELTA
-        else:
-            u_output[i] = u_optimal[i]
-    return u_output
+
+
 if __name__ == "__main__":
     simulation()

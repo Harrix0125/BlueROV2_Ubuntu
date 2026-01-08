@@ -1,4 +1,84 @@
 import numpy as np
+from nmpc_params import NMPC_params as MPCC
+class VisualTarget:
+    def __init__(self, start_state, fov_h = 90, fov_v = 80, max_dist = 10):
+        self.true_state = np.array(start_state[0:6])
+
+        #seen_state: last position measured by camera (with noise)
+        self.seen_state = np.zeros(3)
+        self.estimated_state = np.zeros(6)
+
+        self.kf = TargetTrackerKF(dt_default=MPCC.T_s)
+
+        self.fov_h_rad = np.deg2rad(fov_h)
+        self.fov_v_rad = np.deg2rad(fov_v)
+        self.max_dist = max_dist
+
+        self.is_visible = True
+        self.last_seen_t = 0
+
+    def check_visibility(self, rov_state):
+        """
+        Check if the target is within the ROV's camera FOV and range.
+        rov_state: [x, y, z, phi, theta, psi, u, v, w, p, q, r]
+        """
+        dx = self.true_state[0] - rov_state[0]
+        dy = self.true_state[1] - rov_state[1]
+        dz = self.true_state[2] - rov_state[2]
+
+        distance = np.sqrt(dx**2 + dy**2 + dz**2)
+        if distance > self.max_dist:
+            self.is_visible = False
+            return self.is_visible
+
+        # Calculate angles in ROV frame
+        yaw = rov_state[5]
+        x_rel =  np.cos(-yaw) * dx - np.sin(-yaw) * dy
+        y_rel =  np.sin(-yaw) * dx + np.cos(-yaw) * dy
+        z_rel = dz
+
+        angle_h = np.arctan2(y_rel, x_rel)
+        angle_v = np.arctan2(z_rel, np.sqrt(x_rel**2 + y_rel**2))
+
+        if (abs(angle_h) <= self.fov_h_rad / 2) and (abs(angle_v) <= self.fov_v_rad / 2):
+            self.is_visible = True
+        else:
+            self.is_visible = False
+
+        return self.is_visible
+
+    def get_camera_estimate(self, rov_state, dt = MPCC.T_s, camera_noise = np.array([0.0, 0.0, 0.0])):
+        """
+        Update the target state estimate based on visibility.
+        If visible, perform KF update with measurement.
+        If not visible, only predict.
+        rov_state: [x, y, z, phi, theta, psi, u, v, w, p, q, r]
+        """
+        self.kf.predict(dt)
+
+        if self.check_visibility(rov_state):
+            self.seen_state = self.true_state[0:3] + camera_noise
+            measurement = self.true_state[0:3]
+            self.kf.update(measurement)
+            self.last_seen_t = 0
+            
+        else:
+            measurement = self.kf.get_state()[0:3]  # No new measurement, use prediction
+            self.kf.update(measurement)
+            self.last_seen_t += dt
+        
+        self.estimated_state = self.kf.get_state()
+        return self.estimated_state
+
+    def truth_update(self, state_moving):
+        self.true_state = np.array(state_moving[0:6])
+
+    def get_time_since_seen(self):
+        return self.last_seen_t
+
+        
+
+
 
 class TargetTrackerKF:
     def __init__(self, dt_default=0.1, process_noise=0.1, measure_noise=0.1):
