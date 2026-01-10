@@ -385,10 +385,12 @@ def get_C_np(nu):
 
     return coriolis_sum
 
-def get_x_dot(x_state, u_control):
+def get_x_dot(x_state, u_control, disturbance = None):
     """
     Calculates x_dot = f(x, u) using purely Numpy math.
     """
+    if disturbance is None:
+        disturbance = np.zeros(6)
     # 1. Unpack State
     eta = x_state[0:6]   # [x, y, z, phi, theta, psi]
     nu  = x_state[6:12]  # [u, v, w, p, q, r]
@@ -427,7 +429,7 @@ def get_x_dot(x_state, u_control):
 
     # 3. Acceleration Dynamics: M * acc = Sum_Forces
     # Total Force in Body Frame
-    total_force = tau - damping_lin - damping_quad - g_force - coriolis_force
+    total_force = tau - damping_lin - damping_quad - g_force - coriolis_force + disturbance
     
     # Body Acceleration
     acc = MPCC.M_INV @ total_force
@@ -442,16 +444,19 @@ def get_x_dot(x_state, u_control):
     # Stack result [pos_dot, att_dot, acc]
     return np.concatenate((pos_dot, att_dot, acc))
 
-def robot_plant_step_RK4(x_current, u_control, dt):
+def robot_plant_step_RK4(x_current, u_control, dt, disturbance = None):
     """
     Simulates one time step using Runge-Kutta 4 (RK4).
     Much more stable than Euler for Coriolis forces.
     """
+    if disturbance is None:
+        disturbance = np.zeros(6)
+
     # RK4 Integration
-    k1 = get_x_dot(x_current, u_control)
-    k2 = get_x_dot(x_current + 0.5 * dt * k1, u_control)
-    k3 = get_x_dot(x_current + 0.5 * dt * k2, u_control)
-    k4 = get_x_dot(x_current + dt * k3, u_control)
+    k1 = get_x_dot(x_current, u_control, disturbance)
+    k2 = get_x_dot(x_current + 0.5 * dt * k1, u_control, disturbance)
+    k3 = get_x_dot(x_current + 0.5 * dt * k2, u_control, disturbance)
+    k4 = get_x_dot(x_current + dt * k3, u_control, disturbance)
     
     x_next = x_current + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
     

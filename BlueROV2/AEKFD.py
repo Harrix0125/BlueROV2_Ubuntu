@@ -2,17 +2,18 @@ import numpy as np
 import casadi as cas
 from nmpc_params import NMPC_params as MPCC
 from model import export_bluerov_model
+import utils
 
-
-class EKF():
+class AEKFD():
     def __init__(self):
         self.dt = MPCC.T_s
-        self.n_states = 12
+        self.n_og_states = 12
         self.n_controls = 8
+        self.n_dist = 6
+        self.n_states = self.n_og_states + self.n_dist
+
         self.initialized = False
-        # Setup CasADi Functions for EKF
-        self._setup_casadi_functions()
-        
+
         # Tuning Matrices (Covariances)
         # Q: Process Noise (Trust in physics model)
         #    High Q = Physics is uncertain, rely more on sensors
@@ -21,8 +22,9 @@ class EKF():
         q_att = [0.05]*3
         q_vel = [0.5]*3
         q_rates = [0.5]*3
-        
-        q_diag = q_pos + q_att + q_vel + q_rates
+
+        q_dist = [0.1]*6  # Disturbance states
+        q_diag = q_pos + q_att + q_vel + q_rates + q_dist
         self.Q = np.diag(q_diag)
 
         # R: Measurement Noise (Trust in sensors)
@@ -30,30 +32,52 @@ class EKF():
         #    Low R = Sensors are precise
         #    Assuming measurement is full state [x,y,z, phi,theta,psi, u,v,w, p,q,r]
         #    Realistically, GPS noise is ~1.0m, IMU is ~0.01 rad
-        r_diag = [0.5]*3 + [0.02]*3 + [0.1]*3 + [0.05]*3 
+        r_pos = [0.5]*3
+        r_att = [0.02]*3
+        r_vel = [0.1]*3
+        r_rates = [0.05]*3
+        r_diag = r_pos + r_att + r_vel + r_rates
         self.R = np.diag(r_diag)
         
         # Initial State & Covariance
         self.x_est = np.zeros(self.n_states)
-        self.P_est = np.eye(self.n_states)*2
+        self.P_est = np.eye(self.n_states)*1
 
-    def _setup_casadi_functions(self):
+        self._setup_augmented_model()
+
+    def _setup_augmented_model(self):
+        """
+        Setup AEKF dynamics w/ Acados model with disturbance states, mapping:
+        AEKF State [0:12] : Model state x
+        AEKF State [12:18] : Disturbance states d
+        """
         acados_model = export_bluerov_model()
-        x_sym = acados_model.x
-        u_sym = acados_model.u
-        f_expl = acados_model.f_expl_expr
 
-        # Discretize (Euler Integration) for Prediction Step
-        # x_next = x + f(x,u)*dt
-        x_next = x_sym + f_expl * self.dt
-        
-        # Calculate Jacobian F = d(x_next)/dx
-        # This is the "A" matrix in linear Kalman Filters
-        jac_F_sym = cas.jacobian(x_next, x_sym)
+        model_x = acados_model.x
+        model_u = acados_model.u
+        model_p = acados_model.p  # Disturbance parameter
+        model_rhs = acados_model.f_expl_expr
 
-        # Create a fast CasADi function to call in the loop
-        # Input: [x, u] -> Output: [x_next, F_matrix]
-        self.predict_dynamics = cas.Function('ekf_pred',[x_sym, u_sym],[x_next, jac_F_sym])
+        # AEKF:
+        x_aug = cas.SX.sym('x_aug', self.n_states)
+        u_in = cas.SX.sym('u_in', self.n_controls)
+
+        x_phys = x_aug[0:self.n_og_states]
+        x_dist = x_aug[self.n_og_states:self.n_states]
+
+        # Substitute dist into the model eqnuations
+        x_dot_phys = cas.substitute(model_rhs, cas.vertcat(model_x, model_u, model_p), cas.vertcat(x_phys, u_in, x_dist))
+
+        d_dot = cas.SX.zeros(self.n_dist)  # Disturbance states are constant (zero dynamics)
+
+        x_dot_aug = cas.vertcat(x_dot_phys, d_dot)
+
+        x_next = x_aug + x_dot_aug * self.dt
+
+        jac_F_sym = cas.jacobian(x_next, x_aug)
+
+        self.predict_dynamics = cas.Function('aekf_pred',[x_aug, u_in],[x_next, jac_F_sym])
+
 
     def predict(self, control):
         # EKF Prediction Step
@@ -67,15 +91,19 @@ class EKF():
         self.P_est = P_pred
 
         return self.x_est
+    
 
     def measurement_update(self, measurement):
         if not self.initialized:
-            self.x_est = measurement
+            self.x_est[0:self.n_og_states] = measurement
+
             self.initialized = True
             print("EKF Initialized")
             return self.x_est
 
-        H = np.eye(self.n_states) 
+        # [ I_12x12, 0_12x6 ]
+        H = np.zeros((self.n_og_states, self.n_states))
+        H[:, :self.n_og_states] = np.eye(self.n_og_states)
         
         # Innovation
         y_k = measurement - H @ self.x_est
@@ -113,7 +141,21 @@ class EKF():
             print("Outlier detected with d^2 =", d_squared)
             return True  # Is Outlier
         return False     # Is Safe
+
+    def get_disturbance_estimate(self):
+        return self.x_est[self.n_og_states:self.n_states]
     
-# Will add asyncronous update and predict calls later
-# will switcht to quaternions if needed
-# Tackle the H Matrix reality: currently,assuming measurement always has 12 items, but the GPS will likely only give 2 or 3 items, and Depth sensor only 1).
+    def get_state_estimate(self):
+        return self.x_est[0:self.n_og_states]
+    
+    def set_state_estimate(self, x_new):
+        self.x_est[0:self.n_og_states] = x_new
+
+    def set_disturbance_estimate(self, d_new):
+        self.x_est[self.n_og_states:self.n_states] = d_new
+
+
+
+
+
+        

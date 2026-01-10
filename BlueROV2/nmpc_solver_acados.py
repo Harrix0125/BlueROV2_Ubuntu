@@ -19,6 +19,8 @@ class Acados_Solver_Wrapper:
         ny = nx + nu 
         self.ocp.dims.N = MPCC.N
 
+        self.ocp.parameter_values = np.zeros(6)  # Disturbance parameter (i forgot before ops)
+
         # Cost Setup (Linear Least Squares)
         self.ocp.cost.cost_type = 'LINEAR_LS'
         self.ocp.cost.cost_type_e = 'LINEAR_LS'
@@ -39,6 +41,10 @@ class Acados_Solver_Wrapper:
         # References (Init to zero)
         self.ocp.cost.yref = np.zeros((ny, ))
         self.ocp.cost.yref_e = np.zeros((nx, ))
+
+        # Trying to include disturbances
+        self.ocp.dims.np = 6
+        self.ocp.parameter_values = np.zeros(6)
 
         # Constraints
         self.ocp.constraints.lbu = np.array([MPCC.THRUST_MIN] * nu)
@@ -66,9 +72,13 @@ class Acados_Solver_Wrapper:
         self.ocp.solver_options.nlp_solver_type = 'SQP_RTI'
 
         # 6. Generate
-        self.solver = AcadosOcpSolver(self.ocp, json_file='acados_ocp.json')
+        self.solver = AcadosOcpSolver(self.ocp, json_file='acados_ocp.json',generate=True, build=True)
 
-    def solve(self, x0, target_state):
+    def solve(self, x0, target_state, disturbance = None):
+        # Set disturbance parameter
+        if disturbance is None:
+            disturbance = np.zeros(6)
+        
         # Set Initial Condition
         self.solver.set(0, "lbx", x0)
         self.solver.set(0, "ubx", x0)
@@ -82,6 +92,11 @@ class Acados_Solver_Wrapper:
 
         for i in range(MPCC.N + 1):
             self.solver.set(i, "x", x0)
+
+        # Passing disturbance as parameter for every step
+        for i in range(MPCC.N):
+            self.solver.set(i, "p", disturbance)
+
         # Solve
         status = self.solver.solve()
         if status != 0 :

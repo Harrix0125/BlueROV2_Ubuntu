@@ -2,8 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from mpl_toolkits.mplot3d import Axes3D
-from estimator import EKF
-from target_estimator import TargetTrackerKF, VisualTarget
+from AEKFD import AEKFD as EKF
+from target_estimator import VisualTarget
 import casadi as cas
 
 from nmpc_solver_acados import Acados_Solver_Wrapper
@@ -20,6 +20,8 @@ def simulation():
     state_now = np.zeros(12)
     state_now[2] = -2
     #state_now[6] = -1 / (MPCC.R_THRUST * 1200)
+
+    estimated_disturbance = np.zeros(6)
 
     state_target = np.zeros(12)
 
@@ -66,9 +68,12 @@ def simulation():
 
     #EKF Setup
     ekf = EKF()
-    ekf.x_est = np.copy(state_now)
-    state_est = np.copy(state_now)
-    noise_ekf = np.random.normal(0, [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
+    ekf.set_state_estimate(state_now)
+
+    # State estimate initialization for EKF with disturbance states
+    state_est = np.zeros(12)
+    state_est[0:12] = np.copy(state_now)
+
     testing_EKF = True
     is_there_noise = False
     noise_ekf = np.random.normal(0, [0.10, 0.10, 0.05, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]) if is_there_noise else np.array([0.0]*12)    
@@ -82,27 +87,27 @@ def simulation():
         for i in range(steps_tot): 
             camera_data.truth_update(state_moving[i,0:6])
 
-            is_visible = camera_data.check_visibility(state_est)
+            is_visible = camera_data.check_visibility(state_est[0:12])
             if is_visible:
                 seen_it_once = True
 
                 # Update target estimate from camera and get state
-                est_target = camera_data.get_camera_estimate(state_est, dt = MPCC.T_s, camera_noise = camera_noise)
+                est_target = camera_data.get_camera_estimate(state_est[0:12], dt = MPCC.T_s, camera_noise = camera_noise)
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
 
                 # Get guidance reference
-                ref_guidance = utils.get_shadow_ref(state_est, est_target_pos, est_target_vel, desired_dist=3.0)
+                ref_guidance = utils.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
 
             elif not is_visible and seen_it_once:
 
                 # Visible before but not now: use last seen position
-                est_target = camera_data.get_camera_estimate(state_est, dt = MPCC.T_s, camera_noise = camera_noise)
+                est_target = camera_data.get_camera_estimate(state_est[0:12], dt = MPCC.T_s, camera_noise = camera_noise)
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
 
                 # Get imaginary reference based on last seen position
-                ref_guidance = utils.get_shadow_ref(state_est, est_target_pos, est_target_vel, desired_dist=4.0)
+                ref_guidance = utils.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=4.0)
                 if camera_data.last_seen_t > 5.0:
                     # If not seen for more than 5 seconds, just stay still
                     ref_guidance = state_est[0:12]
@@ -114,10 +119,9 @@ def simulation():
                 ref_guidance = state_est[0:12]
             
             # Solve NMPC
-            u_optimal = solver.solve(state_est, ref_guidance)
+            u_optimal = solver.solve(state_est, ref_guidance,  disturbance=estimated_disturbance)
             u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
-            u_previous = u_optimal    
-
+            u_previous = u_optimal
             # Plant Step [Imagine this as GPS]
             state_now = utils.robot_plant_step_RK4(state_now, u_optimal, MPCC.T_s)
             
@@ -128,13 +132,15 @@ def simulation():
                     noise_ekf = np.random.normal(0, [0.10, 0.10, 0.05, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
                 else:
                     noise_ekf = np.random.normal(0, [0.0]*12)
-                measured_state = state_now + noise_ekf
+                measured_state = state_now[0:12] + noise_ekf
                 # Updates EKF P and state estimate
                 ekf.predict(u_optimal)
                 # Gets new state estimate with K gain
-                state_est = ekf.measurement_update(measured_state)
+                ekf.measurement_update(measured_state)
+                state_est = ekf.get_state_estimate()
+                estimated_disturbance = ekf.get_disturbance_estimate()
             else:
-                state_est = np.copy(state_now)
+                state_est = np.copy(state_now[0:12])
             
 
 

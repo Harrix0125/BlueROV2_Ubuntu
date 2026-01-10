@@ -97,7 +97,7 @@ class NMPC_params:
     pos_coef = 5
     z_coef = pos_coef * 1.5
     angle_coef = 1
-    pitch_coef = 40
+    pitch_coef = 50
     psi_coef = 40
     Q_POS = [pos_coef, pos_coef, z_coef, angle_coef, pitch_coef, psi_coef] 
     
@@ -107,13 +107,13 @@ class NMPC_params:
     Q_VEL = [vel_coef, vel_coef, vel_coef, angV_coef, angV_coef, angV_coef]
     
     # Control Effort to minimize thruster usage: if too low it goes crazy and rotates
-    R_THRUST = 0.01
+    R_THRUST = 0.008
     Q_diag = Q_POS + Q_VEL
     Q = cas.diag(Q_diag)
 
     #   Weights at time = N
-    pos_N = 100.0
-    angle_N = 40.0
+    pos_N = 150.0
+    angle_N = 80.0
     Q_POS_N = [pos_N, pos_N, pos_N, angle_N, angle_N, angle_N] 
 
     vel_N = 10

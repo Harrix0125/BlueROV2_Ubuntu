@@ -11,6 +11,9 @@ def export_bluerov_model():
     eta = x_state[0:6]
     nu  = x_state[6:12]
     
+    # Parameter disturbances: External forces and moments (6) [fx, fy, fz, mx, my, mz]
+    p_dist = cas.SX.sym('p_dist', 6)
+
     # Controls: Thruster inputs (8)
     u_ctrl = cas.SX.sym('u_ctrl', 8)
 
@@ -49,12 +52,10 @@ def export_bluerov_model():
     # 
     tau = cas.mtimes(TAM, u_ctrl)
     D_total = D_lin + D_quad
-    
-    # force sum (Ignoring Coriolis?)
     coriolis_matrix = utils.get_C_SX(nu)
-    forces_sum = tau - cas.mtimes((D_total), nu) - g_vec
 
-    forces_sum = tau - cas.mtimes((D_total+coriolis_matrix), nu) - g_vec
+    # Forces sum : tau - (D + C) * nu - g + disturbance (=p_dist)
+    forces_sum = tau - cas.mtimes((D_total+coriolis_matrix), nu) - g_vec + p_dist
     nu_dot = cas.mtimes(M_inv, forces_sum)
 
     J1 = utils.get_J1(phi, theta, psi) # Ensure utils returns SX compatible logic
@@ -70,6 +71,7 @@ def export_bluerov_model():
     model = AcadosModel()
     model.f_expl_expr = f_expl
     model.x = x_state
+    model.p = p_dist
     model.u = u_ctrl
     model.name = model_name
 
