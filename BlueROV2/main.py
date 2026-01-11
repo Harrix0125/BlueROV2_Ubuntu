@@ -49,9 +49,9 @@ def simulation():
 
     thrust_history = [] 
     u_previous = np.zeros(8)
-    MAX_DELTA = MPCC.THRUST_MAX * MPCC.T_s * 2
+    MAX_DELTA = MPCC.THRUST_MAX * MPCC.T_s *1
 
-    t_simulation = 30 #sec
+    t_simulation = 40 #sec
     steps_tot = int(t_simulation /  MPCC.T_s)
 
     # Assuming that this is the data we get from our ideal camera system
@@ -60,7 +60,7 @@ def simulation():
     t0 = time.time()
 
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
-    round = 4
+    round = 3
     if round == 3:
         state_moving = utils.get_linear_traj(steps_tot, MPCC.T_s, speed=0.9)
     elif round == 4:
@@ -75,15 +75,22 @@ def simulation():
     state_est[0:12] = np.copy(state_now)
 
     testing_EKF = True
-    is_there_noise = False
+    is_there_noise = True
     noise_ekf = np.random.normal(0, [0.10, 0.10, 0.05, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]) if is_there_noise else np.array([0.0]*12)    
     print("noise_ekf:", noise_ekf)
     # Camera Model Setup
     camera_data = VisualTarget(start_state=state_moving[0,:], fov_h=90, fov_v=80, max_dist=10)
     camera_noise = np.random.normal(0, 0.1, 3) if is_there_noise else np.array([0.0]*3)
     seen_it_once = False
+    wait_here = np.copy(state_now[0:12])
+
+    # External Disturbance setup:
+    force_world = np. array([10, 0, 1.0])
+    tether_disturbance = np.array([0,0,0,0,0,0])
+    real_disturbance = np.zeros(6)
 
     if round > 2:
+        print("BLEEEP")
         for i in range(steps_tot): 
             camera_data.truth_update(state_moving[i,0:6])
 
@@ -97,7 +104,7 @@ def simulation():
                 est_target_vel = est_target[3:6]
 
                 # Get guidance reference
-                ref_guidance = utils.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+                ref_guidance = utils.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=3)
 
             elif not is_visible and seen_it_once:
 
@@ -107,23 +114,25 @@ def simulation():
                 est_target_vel = est_target[3:6]
 
                 # Get imaginary reference based on last seen position
-                ref_guidance = utils.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=4.0)
+                ref_guidance = utils.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=3.0)
                 if camera_data.last_seen_t > 5.0:
                     # If not seen for more than 5 seconds, just stay still
                     ref_guidance = state_est[0:12]
                     ref_guidance[6:12] = 0.0
                     ref_guidance[4] = 0 
                     seen_it_once = False
+                    wait_here = state_est[0:12]
             else:
                 # Not visible and never seen: stay still till i see something
-                ref_guidance = state_est[0:12]
+                ref_guidance = wait_here[0:12]
             
             # Solve NMPC
             u_optimal = solver.solve(state_est, ref_guidance,  disturbance=estimated_disturbance)
             u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
             u_previous = u_optimal
             # Plant Step [Imagine this as GPS]
-            state_now = utils.robot_plant_step_RK4(state_now, u_optimal, MPCC.T_s)
+            real_disturbance[0:3] = utils.force_w2b(state_est, force_world)
+            state_now = utils.robot_plant_step_RK4(state_now, u_optimal, MPCC.T_s, disturbance = real_disturbance)
             
 
             if testing_EKF:
@@ -171,7 +180,7 @@ def simulation():
             u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
             u_previous = u_optimal
             # Plant Step
-            state_now = utils.robot_plant_step(state_now, u_optimal, MPCC.T_s)
+            state_now = utils.robot_plant_step(state_now, u_optimal, MPCC.T_s, real_disturbance)
 
             traj_x.append(state_now[0])
             traj_y.append(state_now[1])
@@ -218,8 +227,9 @@ def simulation():
     if round <3:   
         plot_double_target_3d(np.array(traj_x), np.array(traj_y), np.array(traj_z), state_target_1, state_target_2, thrust_history)
     elif round >= 3:
-        plot_TT_3d(
-                    state_moving[:,0], state_moving[:,1], state_moving[:,2], # Reference
+        
+        plot_TT_3d(state_moving[:,0], state_moving[:,1], state_moving[:,2],
+                    ref_x, ref_y, ref_z, # Reference
                     np.array(traj_x), np.array(traj_y), np.array(traj_z),    # ROV Position
                     np.array(traj_phi), np.array(traj_theta), np.array(traj_psi), # ROV Angles
                     thrust_history, MPCC.T_s

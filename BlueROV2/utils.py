@@ -685,3 +685,16 @@ def get_error_avg_std(state_estimate, target_state, ref_state):
         'mae_z': mae_z,
         'avg_3d': avg_3d_dist
     }
+
+def force_w2b(rov_state, force_world):
+    """
+    Rotate Force into Body frame
+    """
+    phi, theta, psi = rov_state[3],rov_state[4], rov_state[5]
+    R_B2W = utils.get_J1_np(phi, theta, psi)
+
+    force_lin_body = R_B2W.T @ force_world[0:3]
+
+    return force_lin_body
+
+        

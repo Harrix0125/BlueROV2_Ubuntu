@@ -48,7 +48,8 @@ def plot_double_target_3d(traj_x, traj_y, traj_z, state_target_1, state_target_2
     plt.tight_layout()
     plt.show()
 
-def plot_TT_3d(ref_x, ref_y, ref_z, 
+def plot_TT_3d(target_x, target_y, target_z,
+               ref_x, ref_y, ref_z, 
                rov_x, rov_y, rov_z, 
                rov_roll, rov_pitch, rov_yaw,  # <--- NEW INPUTS (Radians)
                thrust_history, dt, 
@@ -65,6 +66,10 @@ def plot_TT_3d(ref_x, ref_y, ref_z,
     
     # --- 1. 3D Trajectory Plot ---
     ax1 = fig.add_subplot(121, projection='3d')
+
+    # Plot Target
+    ax1.plot(target_x, target_y, target_z, label='Target', 
+             linewidth=2, color='green')
     
     # Plot Reference
     ax1.plot(ref_x, ref_y, ref_z, label='Reference', 

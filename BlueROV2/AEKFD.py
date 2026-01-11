@@ -23,7 +23,7 @@ class AEKFD():
         q_vel = [0.5]*3
         q_rates = [0.5]*3
 
-        q_dist = [0.1]*6  # Disturbance states
+        q_dist = [7,7,0.5,0.1,0.1,0.1]  # Disturbance states
         q_diag = q_pos + q_att + q_vel + q_rates + q_dist
         self.Q = np.diag(q_diag)
 
@@ -33,8 +33,8 @@ class AEKFD():
         #    Assuming measurement is full state [x,y,z, phi,theta,psi, u,v,w, p,q,r]
         #    Realistically, GPS noise is ~1.0m, IMU is ~0.01 rad
         r_pos = [0.5]*3
-        r_att = [0.02]*3
-        r_vel = [0.1]*3
+        r_att = [0.01]*3
+        r_vel = [0.05]*3
         r_rates = [0.05]*3
         r_diag = r_pos + r_att + r_vel + r_rates
         self.R = np.diag(r_diag)
