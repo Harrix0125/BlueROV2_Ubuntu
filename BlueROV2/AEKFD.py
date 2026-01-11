@@ -23,7 +23,8 @@ class AEKFD():
         q_vel = [0.5]*3
         q_rates = [0.5]*3
 
-        q_dist = [7,7,0.5,0.1,0.1,0.1]  # Disturbance states
+        q_dist = [2,2,0.5,0.1,0.1,0.1]  # Disturbance states
+        #q_dist = [0]*6
         q_diag = q_pos + q_att + q_vel + q_rates + q_dist
         self.Q = np.diag(q_diag)
 
@@ -66,13 +67,20 @@ class AEKFD():
         x_dist = x_aug[self.n_og_states:self.n_states]
 
         # Substitute dist into the model eqnuations
-        x_dot_phys = cas.substitute(model_rhs, cas.vertcat(model_x, model_u, model_p), cas.vertcat(x_phys, u_in, x_dist))
+        x_dot_phys_expr = cas.substitute(model_rhs, cas.vertcat(model_x, model_u, model_p), cas.vertcat(x_phys, u_in, x_dist))
 
-        d_dot = cas.SX.zeros(self.n_dist)  # Disturbance states are constant (zero dynamics)
+        d_dot_expr = cas.SX.zeros(self.n_dist)  # Disturbance states are constant (zero dynamics)
 
-        x_dot_aug = cas.vertcat(x_dot_phys, d_dot)
+        x_dot_aug_expr = cas.vertcat(x_dot_phys_expr, d_dot_expr)
 
-        x_next = x_aug + x_dot_aug * self.dt
+        f_dyn = cas.Function('f_dyn', [x_aug, u_in], [x_dot_aug_expr])
+
+        k1 = f_dyn(x_aug, u_in)
+        k2 = f_dyn(x_aug + 0.5*self.dt * k1, u_in)
+        k3 = f_dyn(x_aug + 0.5*self.dt * k2, u_in)
+        k4 = f_dyn(x_aug + self.dt * k3, u_in)
+
+        x_next = x_aug + (self.dt/6)*(k1 + 2*k2 + 2*k3 + k4)
 
         jac_F_sym = cas.jacobian(x_next, x_aug)
 

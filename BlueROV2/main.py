@@ -47,6 +47,8 @@ def simulation():
 
     ref_x, ref_y, ref_z = [], [], []
 
+    target_estimation = [], [], []
+
     thrust_history = [] 
     u_previous = np.zeros(8)
     MAX_DELTA = MPCC.THRUST_MAX * MPCC.T_s *1
@@ -60,7 +62,7 @@ def simulation():
     t0 = time.time()
 
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
-    round = 3
+    round = 4
     if round == 3:
         state_moving = utils.get_linear_traj(steps_tot, MPCC.T_s, speed=0.9)
     elif round == 4:
@@ -80,12 +82,12 @@ def simulation():
     print("noise_ekf:", noise_ekf)
     # Camera Model Setup
     camera_data = VisualTarget(start_state=state_moving[0,:], fov_h=90, fov_v=80, max_dist=10)
-    camera_noise = np.random.normal(0, 0.1, 3) if is_there_noise else np.array([0.0]*3)
+    camera_noise = np.random.normal(0, 0.5, 3) if is_there_noise else np.array([0.0]*3)
     seen_it_once = False
     wait_here = np.copy(state_now[0:12])
 
     # External Disturbance setup:
-    force_world = np. array([10, 0, 1.0])
+    force_world = np. array([5,5,2])
     tether_disturbance = np.array([0,0,0,0,0,0])
     real_disturbance = np.zeros(6)
 
@@ -172,6 +174,8 @@ def simulation():
             ref_x.append(ref_guidance[0])
             ref_y.append(ref_guidance[1])
             ref_z.append(ref_guidance[2])
+
+            target_estimation.append(est_target_pos)
 
     elif round == 3:
         for i in range(steps_tot): 
