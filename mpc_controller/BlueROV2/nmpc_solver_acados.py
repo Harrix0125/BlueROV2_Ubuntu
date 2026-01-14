@@ -1,8 +1,8 @@
 from acados_template import AcadosOcp, AcadosOcpSolver
-from model import export_bluerov_model
+from .model import export_bluerov_model
 import numpy as np
 import scipy.linalg
-from nmpc_params import NMPC_params as MPCC
+from .nmpc_params import NMPC_params as MPCC
 import os
 
 # Wrapper class for Acados NMPC Solver

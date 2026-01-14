@@ -1,8 +1,7 @@
 import numpy as np
 import casadi as cas
 import matplotlib.pyplot as plt
-from nmpc_params import NMPC_params as MPCC
-import utils as utils
+from .nmpc_params import NMPC_params as MPCC
 
 def get_error_dynamics(model, target_state):
     """
@@ -26,10 +25,10 @@ def get_error_dynamics(model, target_state):
     
     # 3. Get Rotation Matrices using YOUR utils function
     # R_rov: Rotates ROV Body -> World
-    R_rov = utils.get_J1(eta_rov[0], eta_rov[1], eta_rov[2])
+    R_rov = get_J1(eta_rov[0], eta_rov[1], eta_rov[2])
     
     # R_t: Rotates Target Body -> World
-    R_t = utils.get_J1(eta_target[0], eta_target[1], eta_target[2])
+    R_t = get_J1(eta_target[0], eta_target[1], eta_target[2])
     
     # 4. Calculate Position Error in Target Frame
     # epsilon = R_t.T * (p_rov - p_target)

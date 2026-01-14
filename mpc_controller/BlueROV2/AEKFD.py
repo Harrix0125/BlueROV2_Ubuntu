@@ -23,7 +23,7 @@ class AEKFD():
         q_vel = [0.5]*3
         q_rates = [0.5]*3
 
-        q_dist = [2,2,0.5,0.1,0.1,0.1]  # Disturbance states
+        q_dist = [0.5,0.5,0.5,0.1,0.1,0.1]  # Disturbance states
         #q_dist = [0]*6
         q_diag = q_pos + q_att + q_vel + q_rates + q_dist
         self.Q = np.diag(q_diag)
@@ -80,6 +80,7 @@ class AEKFD():
         k3 = f_dyn(x_aug + 0.5*self.dt * k2, u_in)
         k4 = f_dyn(x_aug + self.dt * k3, u_in)
 
+
         x_next = x_aug + (self.dt/6)*(k1 + 2*k2 + 2*k3 + k4)
 
         jac_F_sym = cas.jacobian(x_next, x_aug)
@@ -122,11 +123,25 @@ class AEKFD():
         # S = How much uncertainty total? (State P + Sensor R)
         S_k = H @ self.P_est @ H.T + self.R
         
+        #   VFF adaptive law
+        beta = 1.0
+        gamma = 1.0
+        nis_threshold = 12.0
+        nis = self.check_outlier(y_k, S_k)
         # We pass y_k (already wrapped) and S_k (includes R)
-        if self.check_outlier(y_k, S_k, threshold=26.2): # Threshold for ~12 DOF
+        if (nis > 26.2): # Threshold for ~12 DOF
             # REJECT: Return the predicted state as-is
             print("Outlier rejected")
             return self.x_est
+        elif (nis > nis_threshold):
+            print("NIS greater than trheshold", nis)
+            beta = 1 + gamma*(nis - nis_threshold)
+            beta = min(beta,100)
+
+            # Re-calculate self.P_est
+            self.P_est =self.P_est*beta
+            # Re-calculate S_k
+            S_k = H @ self.P_est @ H.T + self.R
 
         # Calculate Kalman Gain
         K_k = self.P_est @ H.T @ np.linalg.inv(S_k)
@@ -140,15 +155,11 @@ class AEKFD():
 
         return self.x_est
     
-    def check_outlier(self, y_k, S_k, threshold):
-        # Calculate Mahalanobis Distance squared: d^2 = y^T * S^-1 * y
+    def check_outlier(self, y_k, S_k):
+        # Calculate Mahalanobis Distance squared: d^2 = y^T * S^-1 * y = Normalized Innovation Squared
         # To add in EKF LaTeX notes
         d_squared = y_k.T @ np.linalg.inv(S_k) @ y_k
-        
-        if d_squared > threshold:
-            print("Outlier detected with d^2 =", d_squared)
-            return True  # Is Outlier
-        return False     # Is Safe
+        return d_squared
 
     def get_disturbance_estimate(self):
         return self.x_est[self.n_og_states:self.n_states]

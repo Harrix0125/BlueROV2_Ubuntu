@@ -47,11 +47,12 @@ def simulation():
 
     ref_x, ref_y, ref_z = [], [], []
 
-    target_estimation = [], [], []
+    target_estimation = []
+    est_target_pos = np.zeros(3)
 
     thrust_history = [] 
     u_previous = np.zeros(8)
-    MAX_DELTA = MPCC.THRUST_MAX * MPCC.T_s *1
+    MAX_DELTA = MPCC.THRUST_MAX * MPCC.T_s *1000
 
     t_simulation = 40 #sec
     steps_tot = int(t_simulation /  MPCC.T_s)
@@ -87,7 +88,7 @@ def simulation():
     wait_here = np.copy(state_now[0:12])
 
     # External Disturbance setup:
-    force_world = np. array([5,5,2])
+    force_world = np.array([-30,-30,-30])
     tether_disturbance = np.array([0,0,0,0,0,0])
     real_disturbance = np.zeros(6)
 
@@ -133,7 +134,10 @@ def simulation():
             u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
             u_previous = u_optimal
             # Plant Step [Imagine this as GPS]
-            real_disturbance[0:3] = utils.force_w2b(state_est, force_world)
+            if i > 400:
+                real_disturbance[0:3] = utils.force_w2b(state_est, force_world)
+            else:
+                real_disturbance[0:3] = utils.force_w2b(state_est, np.array([0,0,0]))
             state_now = utils.robot_plant_step_RK4(state_now, u_optimal, MPCC.T_s, disturbance = real_disturbance)
             
 

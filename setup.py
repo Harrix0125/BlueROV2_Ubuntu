@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'mpc_node = mpc_controller.mpc_node:main', # <--- Add this line
+            'nmpc_node = mpc_controller.nmpc_node:main', # <--- Add this line
         ],
     },
 )
