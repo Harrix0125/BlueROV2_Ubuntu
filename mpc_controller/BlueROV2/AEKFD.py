@@ -1,14 +1,11 @@
 import numpy as np
 import casadi as cas
-from nmpc_params import NMPC_params as MPCC
-from model import export_bluerov_model
-import utils
 
 class AEKFD():
-    def __init__(self):
-        self.dt = MPCC.T_s
+    def __init__(self, acados_model, params, x0 = None):
+        self.dt = params.T_s
         self.n_og_states = 12
-        self.n_controls = 8
+        self.n_controls = params.nu
         self.n_dist = 6
         self.n_states = self.n_og_states + self.n_dist
 
@@ -18,41 +15,28 @@ class AEKFD():
         # Q: Process Noise (Trust in physics model)
         #    High Q = Physics is uncertain, rely more on sensors
         #    Low Q = Physics is perfect, ignore noisy sensors
-        q_pos = [0.05]*3
-        q_att = [0.05]*3
-        q_vel = [0.5]*3
-        q_rates = [0.5]*3
-
-        q_dist = [0.5,0.5,0.5,0.1,0.1,0.1]  # Disturbance states
-        #q_dist = [0]*6
-        q_diag = q_pos + q_att + q_vel + q_rates + q_dist
-        self.Q = np.diag(q_diag)
+        self.Q = params.AEKFD_Q
 
         # R: Measurement Noise (Trust in sensors)
         #    High R = Sensors are noisy, rely on physics
         #    Low R = Sensors are precise
         #    Assuming measurement is full state [x,y,z, phi,theta,psi, u,v,w, p,q,r]
-        #    Realistically, GPS noise is ~1.0m, IMU is ~0.01 rad
-        r_pos = [0.5]*3
-        r_att = [0.01]*3
-        r_vel = [0.05]*3
-        r_rates = [0.05]*3
-        r_diag = r_pos + r_att + r_vel + r_rates
-        self.R = np.diag(r_diag)
+        #    Realistically, GPS noise is ~1.0m, IMU is ~0.01 rad        
+        self.R = params.AEKFD_R
         
         # Initial State & Covariance
         self.x_est = np.zeros(self.n_states)
         self.P_est = np.eye(self.n_states)*1
 
-        self._setup_augmented_model()
+        self._setup_augmented_model(acados_model)
 
-    def _setup_augmented_model(self):
+    def _setup_augmented_model(self, acados_model):
         """
         Setup AEKF dynamics w/ Acados model with disturbance states, mapping:
         AEKF State [0:12] : Model state x
         AEKF State [12:18] : Disturbance states d
         """
-        acados_model = export_bluerov_model()
+        
 
         model_x = acados_model.x
         model_u = acados_model.u
@@ -116,6 +100,10 @@ class AEKFD():
         
         # Innovation
         y_k = measurement - H @ self.x_est
+
+        constrained_indeces =  [2,3,4,8,9,10]
+        if self.n_controls == 2:
+            y_k[constrained_indeces] = 0.0
         
         # IMPORTANT: Handle angle wrapping for Yaw (Index 5)
         y_k[5] = (y_k[5] + np.pi) % (2 * np.pi) - np.pi

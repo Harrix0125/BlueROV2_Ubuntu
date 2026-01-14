@@ -7,35 +7,27 @@ from target_estimator import VisualTarget
 import casadi as cas
 
 from nmpc_solver_acados import Acados_Solver_Wrapper
-from nmpc_params import NMPC_params as MPCC
-from utils import utils
+from nmpc_params import BlueROV_Params, BlueBoat_Params
+from model import export_vehicle_model
+from utils import Vehicle_Utils
 from plotters import LOS_plot_dynamics, plot_double_target_3d, plot_TT_3d, LOS_plot_camera_fov
 def simulation():
-    # Initialize the new Acados solver
+    vehicle_type = "BOAT"
+    state_now = np.zeros(12)
+    
+    if vehicle_type == "ROV":
+        my_params = BlueROV_Params()
+        print("Loading BlueROV2 Heavy")
+        state_now[2] = -2
+    elif vehicle_type == "BOAT":
+        my_params = BlueBoat_Params()
+    sim = Vehicle_Utils(my_params)
+
     # This will trigger code generation and compilation (takes time once)
     print("Compiling Acados Solver...")
-    solver = Acados_Solver_Wrapper()
+    solver = Acados_Solver_Wrapper(my_params)
     print("Compilation Complete.")
 
-    state_now = np.zeros(12)
-    state_now[2] = -2
-    #state_now[6] = -1 / (MPCC.R_THRUST * 1200)
-
-    estimated_disturbance = np.zeros(6)
-
-    state_target = np.zeros(12)
-
-    state_target_1 = np.zeros(12)
-    state_target_1[0] = 2.0
-    state_target_1[1] = -2.0
-    state_target_1[2] = -5
-    state_target_1[5] = 0
-
-    state_target_2 = np.zeros(12)
-    state_target_2[0] = -4.0
-    state_target_2[1] = -5.0
-    state_target_2[2] = -2.0
-    state_target_2[5] = 0
 
 
     # Storage
@@ -51,26 +43,26 @@ def simulation():
     est_target_pos = np.zeros(3)
 
     thrust_history = [] 
-    u_previous = np.zeros(8)
-    MAX_DELTA = MPCC.THRUST_MAX * MPCC.T_s *1000
+    u_previous = np.zeros(my_params.nu)
+    MAX_DELTA = my_params.THRUST_MAX * my_params.T_s *1000
 
-    t_simulation = 40 #sec
-    steps_tot = int(t_simulation /  MPCC.T_s)
+    t_simulation = 20 #sec
+    steps_tot = int(t_simulation /  my_params.T_s)
 
     # Assuming that this is the data we get from our ideal camera system
-    state_target = state_target_1
-    state_moving = utils.generate_target_trajectory(steps_tot, MPCC.T_s, speed=0.9)
+    state_moving = sim.generate_target_trajectory(steps_tot, my_params.T_s, speed=0.9)
     t0 = time.time()
 
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
-    round = 4
+    round = 3
     if round == 3:
-        state_moving = utils.get_linear_traj(steps_tot, MPCC.T_s, speed=0.9)
+        state_moving = sim.get_linear_traj(steps_tot, my_params.T_s, speed=0.9)
     elif round == 4:
-        state_moving = utils.generate_target_trajectory(steps_tot, MPCC.T_s, speed=0.9)
+        state_moving = sim.generate_target_trajectory(steps_tot, my_params.T_s, speed=0.9)
 
     #EKF Setup
-    ekf = EKF()
+    acados_model = export_vehicle_model(my_params)
+    ekf = EKF(acados_model, my_params)
     ekf.set_state_estimate(state_now)
 
     # State estimate initialization for EKF with disturbance states
@@ -79,16 +71,18 @@ def simulation():
 
     testing_EKF = True
     is_there_noise = True
-    noise_ekf = np.random.normal(0, [0.10, 0.10, 0.05, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]) if is_there_noise else np.array([0.0]*12)    
+    noise_ekf = my_params.noise_ekf if is_there_noise else np.array([0.0]*12)    
     print("noise_ekf:", noise_ekf)
     # Camera Model Setup
-    camera_data = VisualTarget(start_state=state_moving[0,:], fov_h=90, fov_v=80, max_dist=10)
+    camera_data = VisualTarget(start_state=state_moving[0,:], fov_h=180, fov_v=80, max_dist=10)
     camera_noise = np.random.normal(0, 0.5, 3) if is_there_noise else np.array([0.0]*3)
     seen_it_once = False
     wait_here = np.copy(state_now[0:12])
 
     # External Disturbance setup:
-    force_world = np.array([-30,-30,-30])
+    is_there_disturbance = True
+    estimated_disturbance = np.zeros(6)
+    force_world = np.array([-30,-30, 0])
     tether_disturbance = np.array([0,0,0,0,0,0])
     real_disturbance = np.zeros(6)
 
@@ -102,22 +96,22 @@ def simulation():
                 seen_it_once = True
 
                 # Update target estimate from camera and get state
-                est_target = camera_data.get_camera_estimate(state_est[0:12], dt = MPCC.T_s, camera_noise = camera_noise)
+                est_target = camera_data.get_camera_estimate(state_est[0:12], dt = my_params.T_s, camera_noise = camera_noise)
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
 
                 # Get guidance reference
-                ref_guidance = utils.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=3)
+                ref_guidance = sim.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=3)
 
             elif not is_visible and seen_it_once:
 
                 # Visible before but not now: use last seen position
-                est_target = camera_data.get_camera_estimate(state_est[0:12], dt = MPCC.T_s, camera_noise = camera_noise)
+                est_target = camera_data.get_camera_estimate(state_est[0:12], dt = my_params.T_s, camera_noise = camera_noise)
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
 
                 # Get imaginary reference based on last seen position
-                ref_guidance = utils.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=3.0)
+                ref_guidance = sim.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=3.0)
                 if camera_data.last_seen_t > 5.0:
                     # If not seen for more than 5 seconds, just stay still
                     ref_guidance = state_est[0:12]
@@ -134,17 +128,19 @@ def simulation():
             u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
             u_previous = u_optimal
             # Plant Step [Imagine this as GPS]
-            if i > 400:
-                real_disturbance[0:3] = utils.force_w2b(state_est, force_world)
+            if is_there_disturbance == False:
+                real_disturbance[0:6] = np.zeros(6)
+            elif i > 200:
+                real_disturbance[0:3] = sim.force_w2b(state_est, force_world*np.abs(np.sin(i/400)))
             else:
-                real_disturbance[0:3] = utils.force_w2b(state_est, np.array([0,0,0]))
-            state_now = utils.robot_plant_step_RK4(state_now, u_optimal, MPCC.T_s, disturbance = real_disturbance)
+                real_disturbance[0:3] = sim.force_w2b(state_est, force_world*0)
+            state_now = sim.robot_plant_step_RK4(state_now, u_optimal, my_params.T_s, disturbance = real_disturbance)
             
 
             if testing_EKF:
                 # EKF:
                 if is_there_noise:
-                    noise_ekf = np.random.normal(0, [0.10, 0.10, 0.05, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
+                    noise_ekf = my_params.noise_ekf
                 else:
                     noise_ekf = np.random.normal(0, [0.0]*12)
                 measured_state = state_now[0:12] + noise_ekf
@@ -188,7 +184,7 @@ def simulation():
             u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
             u_previous = u_optimal
             # Plant Step
-            state_now = utils.robot_plant_step(state_now, u_optimal, MPCC.T_s, real_disturbance)
+            state_now = sim.robot_plant_step(state_now, u_optimal, my_params.T_s, real_disturbance)
 
             traj_x.append(state_now[0])
             traj_y.append(state_now[1])
@@ -197,58 +193,32 @@ def simulation():
             traj_theta.append(state_now[4]) # Pitch
             traj_psi.append(state_now[5])   # Yaw
             thrust_history.append(u_optimal)
-    elif round < 3:
-        for i in range(steps_tot): 
-            # Solve
-            u_optimal = solver.solve(state_now, state_target)
-            u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
-            u_previous = u_optimal
-            # Plant Step
-            state_now = utils.robot_plant_step(state_now, u_optimal, MPCC.T_s)
-
-            traj_x.append(state_now[0])
-            traj_y.append(state_now[1])
-            traj_z.append(state_now[2])
-            traj_phi.append(state_now[3])   # Roll
-            traj_theta.append(state_now[4]) # Pitch
-            traj_psi.append(state_now[5])   # Yaw
-            thrust_history.append(u_optimal)
-            
-            dist = np.linalg.norm(state_now[:3] - state_target[:3])
-            
-            if dist < 0.05 and round == 2:
-                print(f"Target Reached at step {i}!")
-                break
-            elif dist < 0.05 and round == 1:
-                print(f"First Target Reached at step {i}, setting new target.")
-                state_target = state_target_2
-                round += 1
+    
 
 
-    # 3. Plotting
+
+    # Plotting
     t_end = time.time()
     t_sum = t_end - t0
     print(f"{t_sum:.4f}s is the total computational time!")
     
     print("Plotting results...")
     thrust_history = np.array(thrust_history)
-    if round <3:   
-        plot_double_target_3d(np.array(traj_x), np.array(traj_y), np.array(traj_z), state_target_1, state_target_2, thrust_history)
-    elif round >= 3:
+    if round >= 3:
         
         plot_TT_3d(state_moving[:,0], state_moving[:,1], state_moving[:,2],
                     ref_x, ref_y, ref_z, # Reference
                     np.array(traj_x), np.array(traj_y), np.array(traj_z),    # ROV Position
                     np.array(traj_phi), np.array(traj_theta), np.array(traj_psi), # ROV Angles
-                    thrust_history, MPCC.T_s
+                    thrust_history, my_params.T_s
                 )
-        LOS_plot_dynamics(traj_x, traj_y, traj_z, state_moving, MPCC.T_s, desired_dist=2.0)
+        LOS_plot_dynamics(traj_x, traj_y, traj_z, state_moving, my_params.T_s, desired_dist=2.0)
 
         if testing_EKF:
-            LOS_plot_dynamics(EKFtraj_x, EKFtraj_y, EKFtraj_z, state_moving, MPCC.T_s, desired_dist=2.0)
+            LOS_plot_dynamics(EKFtraj_x, EKFtraj_y, EKFtraj_z, state_moving, my_params.T_s, desired_dist=2.0)
             
-        LOS_plot_camera_fov(traj_x, traj_y, traj_z, traj_psi, traj_theta, state_moving, MPCC.T_s)
-        utils.get_error_avg_std([traj_x, traj_y, traj_z], state_moving[:,:3].T, [ref_x, ref_y, ref_z])
+        LOS_plot_camera_fov(traj_x, traj_y, traj_z, traj_psi, traj_theta, state_moving, my_params.T_s)
+        sim.get_error_avg_std([traj_x, traj_y, traj_z], state_moving[:,:3].T, [ref_x, ref_y, ref_z])
         plt.show()
 
 def cap_input(u_previous, u_optimal, MAX_DELTA = 35.0):

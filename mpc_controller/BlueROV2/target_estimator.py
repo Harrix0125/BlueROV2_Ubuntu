@@ -1,5 +1,5 @@
 import numpy as np
-from nmpc_params import NMPC_params as MPCC
+from nmpc_params import BlueROV_Params as MPCC
 class VisualTarget:
     def __init__(self, start_state, fov_h = 90, fov_v = 80, max_dist = 10):
         self.true_state = np.array(start_state[0:6])

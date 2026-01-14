@@ -1,9 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from nmpc_params import NMPC_params as MPCC
 
 
-def plot_double_target_3d(traj_x, traj_y, traj_z, state_target_1, state_target_2,thrust_history):
+def plot_double_target_3d(traj_x, traj_y, traj_z, state_target_1, state_target_2,thrust_history, dt):
     fig = plt.figure(figsize=(15, 7))
     # --- Trajectory Plot ---
     ax1 = fig.add_subplot(121, projection='3d')
@@ -30,7 +29,7 @@ def plot_double_target_3d(traj_x, traj_y, traj_z, state_target_1, state_target_2
     
     # --- Thruster Plot ---
     ax2 = fig.add_subplot(122)
-    time_axis = np.arange(thrust_history.shape[0]) * MPCC.T_s
+    time_axis = np.arange(thrust_history.shape[0]) * dt
     
     for t in range(thrust_history.shape[1]):
         ax2.plot(time_axis, thrust_history[:, t], label=f'T{t+1}')
