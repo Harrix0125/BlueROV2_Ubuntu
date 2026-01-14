@@ -12,7 +12,7 @@ from model import export_vehicle_model
 from utils import Vehicle_Utils
 from plotters import LOS_plot_dynamics, plot_double_target_3d, plot_TT_3d, LOS_plot_camera_fov
 def simulation():
-    vehicle_type = "BOAT"
+    vehicle_type = "ROV"
     state_now = np.zeros(12)
     
     if vehicle_type == "ROV":
@@ -39,7 +39,7 @@ def simulation():
 
     ref_x, ref_y, ref_z = [], [], []
 
-    target_estimation = []
+    target_estimation_x, target_estimation_y, target_estimation_z = [], [], []
     est_target_pos = np.zeros(3)
 
     thrust_history = [] 
@@ -54,7 +54,7 @@ def simulation():
     t0 = time.time()
 
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
-    round = 3
+    round = 4
     if round == 3:
         state_moving = sim.get_linear_traj(steps_tot, my_params.T_s, speed=0.9)
     elif round == 4:
@@ -74,13 +74,13 @@ def simulation():
     noise_ekf = my_params.noise_ekf if is_there_noise else np.array([0.0]*12)    
     print("noise_ekf:", noise_ekf)
     # Camera Model Setup
-    camera_data = VisualTarget(start_state=state_moving[0,:], fov_h=180, fov_v=80, max_dist=10)
-    camera_noise = np.random.normal(0, 0.5, 3) if is_there_noise else np.array([0.0]*3)
+    camera_data = VisualTarget(start_state=state_moving[0,:], fov_h=90, fov_v=80, max_dist=10)
+    camera_noise = np.random.normal(0, 0.06, 3) if is_there_noise else np.array([0.0]*3)
     seen_it_once = False
     wait_here = np.copy(state_now[0:12])
 
     # External Disturbance setup:
-    is_there_disturbance = True
+    is_there_disturbance = False
     estimated_disturbance = np.zeros(6)
     force_world = np.array([-30,-30, 0])
     tether_disturbance = np.array([0,0,0,0,0,0])
@@ -91,7 +91,7 @@ def simulation():
         for i in range(steps_tot): 
             camera_data.truth_update(state_moving[i,0:6])
 
-            is_visible = camera_data.check_visibility(state_est[0:12])
+            is_visible = camera_data.check_visibility(state_est[0:12], seen_it_once)
             if is_visible:
                 seen_it_once = True
 
@@ -101,7 +101,7 @@ def simulation():
                 est_target_vel = est_target[3:6]
 
                 # Get guidance reference
-                ref_guidance = sim.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=3)
+                ref_guidance = sim.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2)
 
             elif not is_visible and seen_it_once:
 
@@ -111,7 +111,7 @@ def simulation():
                 est_target_vel = est_target[3:6]
 
                 # Get imaginary reference based on last seen position
-                ref_guidance = sim.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=3.0)
+                ref_guidance = sim.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.0)
                 if camera_data.last_seen_t > 5.0:
                     # If not seen for more than 5 seconds, just stay still
                     ref_guidance = state_est[0:12]
@@ -174,8 +174,14 @@ def simulation():
             ref_x.append(ref_guidance[0])
             ref_y.append(ref_guidance[1])
             ref_z.append(ref_guidance[2])
+            if is_visible:
+                target_estimation_x.append(est_target_pos[0])
+                target_estimation_y.append(est_target_pos[1])
+                target_estimation_z.append(est_target_pos[2])
+            
+            print(camera_noise)
+            camera_noise = np.random.normal(0, 0.06, 3)
 
-            target_estimation.append(est_target_pos)
 
     elif round == 3:
         for i in range(steps_tot): 
@@ -212,9 +218,16 @@ def simulation():
                     np.array(traj_phi), np.array(traj_theta), np.array(traj_psi), # ROV Angles
                     thrust_history, my_params.T_s
                 )
+        
         LOS_plot_dynamics(traj_x, traj_y, traj_z, state_moving, my_params.T_s, desired_dist=2.0)
 
         if testing_EKF:
+            plot_TT_3d(np.array(target_estimation_x), np.array(target_estimation_y), np.array(target_estimation_z),
+                    ref_x, ref_y, ref_z, # Reference
+                    np.array(traj_x), np.array(traj_y), np.array(traj_z),    # ROV Position
+                    np.array(traj_phi), np.array(traj_theta), np.array(traj_psi), # ROV Angles
+                    thrust_history, my_params.T_s
+                )
             LOS_plot_dynamics(EKFtraj_x, EKFtraj_y, EKFtraj_z, state_moving, my_params.T_s, desired_dist=2.0)
             
         LOS_plot_camera_fov(traj_x, traj_y, traj_z, traj_psi, traj_theta, state_moving, my_params.T_s)

@@ -17,7 +17,7 @@ class VisualTarget:
         self.is_visible = True
         self.last_seen_t = 0
 
-    def check_visibility(self, rov_state):
+    def check_visibility(self, rov_state, seen_it_once = True):
         """
         Check if the target is within the ROV's camera FOV and range.
         rov_state: [x, y, z, phi, theta, psi, u, v, w, p, q, r]
@@ -42,6 +42,9 @@ class VisualTarget:
 
         if (abs(angle_h) <= self.fov_h_rad / 2) and (abs(angle_v) <= self.fov_v_rad / 2):
             self.is_visible = True
+            if seen_it_once == False:
+                #   Setting first time we see it the state like this so that it wil trust more the physics, else we start it at 0-0-0
+                self.kf.set_state(self.true_state)
         else:
             self.is_visible = False
 
@@ -56,10 +59,15 @@ class VisualTarget:
         """
         self.kf.predict(dt)
 
+        dx = self.true_state[0] - rov_state[0]
+        dy = self.true_state[1] - rov_state[1]
+        dz = self.true_state[2] - rov_state[2]
+        distance = np.sqrt(dx**2 + dy**2 + dz**2)
+
         if self.check_visibility(rov_state):
-            self.seen_state = self.true_state[0:3] + camera_noise
+            self.seen_state = self.true_state[0:3] + camera_noise*distance
             measurement = self.true_state[0:3]
-            self.kf.update(measurement)
+            self.kf.update(self.seen_state)
             self.last_seen_t = 0
             
         else:
@@ -81,7 +89,7 @@ class VisualTarget:
 
 
 class TargetTrackerKF:
-    def __init__(self, dt_default=0.1, process_noise=0.1, measure_noise=0.1):
+    def __init__(self, dt_default=0.1, process_noise=0.05, measure_noise=5):
         """
             K filter for 3D position + velocity tracking.
             state vector x :[x, y, z, vx, vy, vz]
@@ -156,3 +164,6 @@ class TargetTrackerKF:
 
     def get_state(self):
         return self.x_est
+    
+    def set_state(self, new_x_est):
+        self.x_est = new_x_est
