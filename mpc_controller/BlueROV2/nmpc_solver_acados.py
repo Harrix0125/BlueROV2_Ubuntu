@@ -1,5 +1,9 @@
 from acados_template import AcadosOcp, AcadosOcpSolver
-from model import export_vehicle_model
+
+from .model import export_vehicle_model
+
+#from model import export_vehicle_model
+
 import numpy as np
 import scipy.linalg
 
@@ -70,7 +74,7 @@ class Acados_Solver_Wrapper:
 
         self.solver = AcadosOcpSolver(self.ocp, json_file='acados_ocp.json',generate=True, build=True)
 
-    def solve(self, x0, target_state, disturbance = None):
+    def solve_legacy_version(self, x0, target_state, disturbance = None):
         if disturbance is None:
             disturbance = np.zeros(6)
         
@@ -96,3 +100,55 @@ class Acados_Solver_Wrapper:
             print(f"Acados NMPC solver returned status {status}!")
         # Return first control
         return self.solver.get(0, "u")
+    
+
+    def solve(self, x0, target_ref, disturbance=None):
+            """
+            target_ref: Can be 1D array (constant reference) OR 2D array (trajectory).
+                        If 2D, shape must be (N+1, 12).
+            """
+            if disturbance is None:
+                disturbance = np.zeros(6)
+            
+            #Initial State Constraint
+            self.solver.set(0, "lbx", x0)
+            self.solver.set(0, "ubx", x0)
+
+            # If you have a trajectory of disturbances, you could iterate this too.
+            for i in range(self.params.N):
+                self.solver.set(i, "p", disturbance)
+
+            # CASE A: Single Point Reference (Old behavior)
+            if target_ref.ndim == 1:
+                y_ref = np.concatenate((target_ref, np.zeros(self.params.nu)))
+                # Set for 0 to N-1
+                for i in range(self.params.N):
+                    self.solver.set(i, "yref", y_ref)
+                # Set for N (Terminal, no controls)
+                self.solver.set(self.params.N, "yref", target_ref)
+
+            # CASE B: Trajectory Reference (New behavior)
+            else:                
+                for i in range(self.params.N):
+                    # Stick to last point if trajectory is too short
+                    idx = min(i, target_ref.shape[0] - 1)
+                    
+                    state_ref = target_ref[idx, :]
+                    u_ref = np.zeros(self.params.nu)
+                    
+                    y_ref_k = np.concatenate((state_ref, u_ref))
+                    self.solver.set(i, "yref", y_ref_k)
+
+                # Terminal Node N
+                idx_N = min(self.params.N, target_ref.shape[0] - 1)
+                state_ref_e = target_ref[idx_N, :]
+                self.solver.set(self.params.N, "yref", state_ref_e)
+
+            for i in range(self.params.N + 1):
+                self.solver.set(i, "x", x0)
+
+            status = self.solver.solve()
+            if status != 0 :
+                print(f"Acados NMPC solver returned status {status}!")
+                
+            return self.solver.get(0, "u")

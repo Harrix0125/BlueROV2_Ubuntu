@@ -17,14 +17,21 @@ class BlueROV_Params(NMPC_params):
         self.W = 112.8           # weight [N]
         self.B = 114.8           # buoyancy [N]
         self.g = 9.82            # gravity [m/s^2]
+        # For gazebo data (It would be easy to get data for real world ROV aswell, at least for the mass as it is sufficient to weight it and there would be low error)
+        self.m = 13
+        self.W = self.m * self.g
+        self.B = 13.14 * self.g
+
+        self.fov_h = 90
+        self.fov_v = 80
         
         # Center of Gravity (CG) and Buoyancy (CB)
         # CG relative to CO
-        self.r_g = np.array([0.0, 0.0, 0.02]) 
+        self.r_g = np.array([0.0, 0.0, -0.02]) 
         self.xg, self.yg, self.zg = self.r_g[0], self.r_g[1], self.r_g[2]
         
         # CB relative to CO
-        self.r_b = np.array([0.0, 0.0, -0.1])
+        self.r_b = np.array([0.0, 0.0, 0.1])
         self.xb, self.yb, self.zb = self.r_b[0], self.r_b[1], self.r_b[2]
 
         # self.moments of Inertia
@@ -39,6 +46,13 @@ class BlueROV_Params(NMPC_params):
         self.K_pd = -0.12
         self.M_qd = -0.12
         self.N_rd = -0.12
+        # Set to zero for Gazebo Simulation! be careful
+        self.X_ud = 0
+        self.Y_vd = 0
+        self.Z_wd = 0
+        self.K_pd = 0
+        self.M_qd = 0
+        self.N_rd = 0
 
         # Linear Damping
         self.X_u = -4.03
@@ -86,13 +100,22 @@ class BlueROV_Params(NMPC_params):
         self.D_QUAD_COEFFS = np.array([-self.X_uu, -self.Y_vv, -self.Z_ww, -self.K_pp, - self.M_qq, -self.N_rr])
 
         # Thruster Allocation self.matrix - 6x8
+        # self.TAM = np.array([
+        #     [ 0.707,  0.707, -0.707, -0.707,  0.0,    0.0,    0.0,    0.0   ],
+        #     [-0.707,  0.707, -0.707,  0.707,  0.0,    0.0,    0.0,    0.0   ],
+        #     [ 0.0,    0.0,    0.0,    0.0,   -1.0,    1.0,    1.0,   -1.0   ],
+        #     [ 0.06,  -0.06,   0.06,  -0.06,  -0.218, -0.218,  0.218,  0.218 ],
+        #     [ 0.06,   0.06,  -0.06,  -0.06,   0.120, -0.120,  0.120, -0.120 ],
+        #     [-0.1888, 0.1888, 0.1888, -0.1888, 0.0,   0.0,    0.0,    0.0   ]
+        # ])
+
         self.TAM = np.array([
-            [ 0.707,  0.707, -0.707, -0.707,  0.0,    0.0,    0.0,    0.0   ],
-            [-0.707,  0.707, -0.707,  0.707,  0.0,    0.0,    0.0,    0.0   ],
-            [ 0.0,    0.0,    0.0,    0.0,   -1.0,    1.0,    1.0,   -1.0   ],
-            [ 0.06,  -0.06,   0.06,  -0.06,  -0.218, -0.218,  0.218,  0.218 ],
-            [ 0.06,   0.06,  -0.06,  -0.06,   0.120, -0.120,  0.120, -0.120 ],
-            [-0.1888, 0.1888, 0.1888, -0.1888, 0.0,   0.0,    0.0,    0.0   ]
+            [-1*0.707, -1*0.707,  +1*0.707,  +1*0.707,  0.0,    0.0,    0.0,    0.0   ],
+            [ -1*0.707, +1*0.707, -1*0.707,  +1*0.707,  0.0,    0.0,    0.0,    0.0   ],
+            [ 0.0,    0.0,    0.0,    0.0,              -1.0,   -1.0,   -1.0,    -1.0   ],
+            [ -1*0.00,   +1*0.00,  -1*0.00,  +1*0.00,  0.218, -0.218,  0.218,  -0.218 ],
+            [ +1*0.00,  +1*0.00,   -1*0.00,  -1*0.00,   0.120, 0.120, -0.120,  -0.120 ],
+            [ -1*0.1888,-1*0.1888, +1*0.1888, +1*0.1888, 0.0,   0.0,    0.0,    0.0   ]
         ])
 
         self.THRUST_MIN = -30.0
@@ -103,27 +126,27 @@ class BlueROV_Params(NMPC_params):
         # Position Errors [x, y, z, phi, theta, psi]
         # self.pos_coef = 5 #chill
         self.pos_coef = 15
-        self.z_coef = self.pos_coef * 1.5
+        self.z_coef = self.pos_coef * 3
         self.angle_coef = 1
-        self.pitch_coef = 50
-        self.psi_coef = 40
+        self.pitch_coef = 40
+        self.psi_coef = 30
         self.Q_POS = [self.pos_coef, self.pos_coef, self.z_coef, self.angle_coef, self.pitch_coef, self.psi_coef] 
         
         # Velocity Errors [u, v, w, p, q, r]
-        self.vel_coef =1
+        self.vel_coef =10
         self.angV_coef = 1
         self.Q_VEL = [self.vel_coef, self.vel_coef, self.vel_coef, self.angV_coef, self.angV_coef, self.angV_coef]
         
         # Control Effort to self.minimize thruster usage: if too low it goes crazy and rotates
-        self.R_THRUST = 0.001
+        self.R_THRUST = 0.01
         self.Q_diag = self.Q_POS + self.Q_VEL
         self.Q = cas.diag(self.Q_diag)
 
         #   Weights at time = N
         # pos_n = 150  #chill
-        self.pos_N = 200.0
+        self.pos_N = 180.0
         self.angle_N = 80.0
-        self.Q_POS_N = [self.pos_N, self.pos_N, self.pos_N, self.angle_N, self.angle_N, self.angle_N] 
+        self.Q_POS_N = [self.pos_N, self.pos_N, self.pos_N*1.5, self.angle_N, self.angle_N, self.angle_N] 
 
         # vel_N = 10  #chill
         self.vel_N = 15
@@ -141,12 +164,12 @@ class BlueROV_Params(NMPC_params):
         # Q: Process Noise (Trust in physics model)
         #    High Q = Physics is uncertain, rely more on sensors
         #    Low Q = Physics is perfect, ignore noisy sensors
-        q_pos = [0.05]*3
-        q_att = [0.05]*3
-        q_vel = [0.5]*3
-        q_rates = [0.5]*3
+        q_pos = [0.5, 0.5, 0.01]
+        q_att = [0.8, 0.5, 0.5]
+        q_vel = [1.0, 1.0, 0.1]
+        q_rates = [0.05, 0.05, 0.1]
 
-        q_dist = [0.5,0.5,0.5,0.1,0.1,0.1]  # Disturbance states
+        q_dist = [0.01,0.01,0.01,0.001,0.001,0.001]  # Disturbance states
         #q_dist = [0]*6
         q_diag = q_pos + q_att + q_vel + q_rates + q_dist
         self.AEKFD_Q = np.diag(q_diag)
@@ -156,10 +179,10 @@ class BlueROV_Params(NMPC_params):
         #    Low R = Sensors are precise
         #    Assuming measurement is full state [x,y,z, phi,theta,psi, u,v,w, p,q,r]
         #    Realistically, GPS noise is ~1.0m, IMU is ~0.01 rad
-        r_pos = [0.5]*3
+        r_pos = [0.1]*3
         r_att = [0.01]*3
-        r_vel = [0.05]*3
-        r_rates = [0.05]*3
+        r_vel = [0.01, 0.01, 0.01]
+        r_rates = [0.01]*3
         r_diag = r_pos + r_att + r_vel + r_rates
         self.AEKFD_R = np.diag(r_diag)
 
@@ -200,6 +223,8 @@ class BlueBoat_Params(NMPC_params):
         self.B = self.W  # floats
         self.zg = 0.05   # erm
         
+        self.fov_h = 180
+        self.fov_v = 180
         # random
         self.Ix = 5.0   # Roll (difficile da ruotare)
         self.Iy = 8.0   # Pitch
@@ -238,7 +263,7 @@ class BlueBoat_Params(NMPC_params):
         # Limiti Motori
         self.THRUST_MIN = -40.0 
         self.THRUST_MAX = 50.0  
-        self.R_THRUST = 0.01
+        self.R_THRUST = 0.1
 
         # --- TUNING NMPC ---
         # = 0 what we cant control

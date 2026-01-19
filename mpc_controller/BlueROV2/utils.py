@@ -169,10 +169,18 @@ class Vehicle_Utils:
 
         # Ideal velocity:
         v_ref_global = v_target_global
-
+        
         # Defining orientation with ROV facing the target:
         target_pointing_vector = p_target - p_reference
         yaw_des = np.arctan2(target_pointing_vector[1], target_pointing_vector[0])
+
+        diff = yaw_des - rov_state[5]
+        if abs(diff) > np.pi:
+            # If error is big due to wrapping, shift the REFERENCE to match the ROV
+            if diff > np.pi:
+                yaw_des -= 2 * np.pi
+            elif diff < -np.pi:
+                yaw_des += 2 * np.pi
 
         dist_plane = np.linalg.norm(target_pointing_vector[0:2])
         pitch_des = np.arctan2(-target_pointing_vector[2], dist_plane)
@@ -198,6 +206,49 @@ class Vehicle_Utils:
         ref_state[8] = w_ref   # Desired Heave 
 
         return ref_state
+
+    def get_shadow_traj(self, rov_state, target_state, target_vel, dt, horizon_N, desired_dist = 2.0):
+        """
+        Generates a list of N reference states (The Trajectory) for the NMPC.
+        """
+        # 1. Get the current 'Shadow' (Reference at t=0) using your existing logic
+        # This ensures the trajectory starts exactly where you want it to start.
+        ref_state_t0 = self.get_shadow_ref(rov_state, target_state, target_vel, desired_dist)
+        
+        # Extract the starting position and ideal velocity of the shadow
+        p_ref_current = ref_state_t0[0:3]       # [x, y, z]
+        v_ref_current = np.array([ref_state_t0[6], ref_state_t0[7], ref_state_t0[8]]) # [u, v, w] (Body or Global? See note below)
+        
+        # NOTE: Your get_shadow_ref transforms velocities to Body Frame (u, v, w).
+        # For propagation, it's easier to work in Global Frame first, then convert back.
+        # So let's use the target's global velocity which you already passed in.
+        v_global_propagation = target_vel if target_vel is not None else np.zeros(3)
+
+        trajectory = []
+
+        # 2. Loop to generate the future points
+        for k in range(int(horizon_N/5)):
+            # Time step into the future
+            time_offset = k * dt
+            
+            # PROPAGATE: Future Position = Start + Velocity * Time
+            # We assume the target moves at constant velocity, so the shadow does too.
+            p_ref_future = p_ref_current + v_global_propagation * time_offset
+            
+            # Create a copy of the t0 reference state to fill in the future values
+            ref_state_k = ref_state_t0.copy()
+            
+            # Update the position in the state vector
+            ref_state_k[0:3] = p_ref_future
+
+            # OPTIONAL: If you want to predict yaw changes (e.g. if target_vel changes direction),
+            # you would update ref_state_k[5] (Yaw) here. 
+            # For a diver, keeping the t0 orientation or aligning with velocity is standard.
+            
+            trajectory.append(ref_state_k)
+
+        return np.array(trajectory) # Shape (N, 12)
+
 
 
     def get_J1(self, phi, theta, psi):
@@ -543,10 +594,13 @@ class Vehicle_Utils:
         # Initial Conditions
         states[0,0] = 0
         states[0,1] = -6
-        states[0,2] = -2.0
+        states[0,2] = -0.5
 
         states[0,4] = 0.5  # Pitch
+        #states[0,4] = 0.0  # Pitch
+
         states[0,5] = 0.36  # Yaw
+
         # Simulation Variables
         current_x, current_y, current_z = states[0, 0], states[0, 1], states[0, 2]
         current_psi = states[0, 5]  # Yaw
@@ -557,16 +611,20 @@ class Vehicle_Utils:
             # We simulate "commands" to turn the target
             # Randomize Yaw Rate (r) - Turning left/right
             target_r = -0.1*np.sin(0.004*k) + 0.08*np.sin(0.0003*k)  #turning L/R
+            target_r = -0.25*np.sin(0.004*k) + 0.1*np.cos(0.003*k)  #crazier traj
+
 
             # Randomize Pitch Rate (q) - Diving/Surfacing
             # Keep it small and spring-loaded to return to horizon
             target_q = np.random.normal(0.0, 0.1) - (current_theta * 0.1)
+            #target_q = 0
+            
             
             # Roll (p) is usually 0 for a stable target
             target_p = 0.0
             
             # Surge Speed (u) - Mostly constant forward motion
-            target_u = speed + np.random.normal(0.0, 0.05)
+            target_u = speed + np.random.normal(0.0, 0.8)
             
             # Sway (v) and Heave (w) are 0 (assuming target moves forward)
             target_v = 0.0
@@ -681,5 +739,4 @@ class Vehicle_Utils:
         force_lin_body = R_B2W.T @ force_world[0:3]
 
         return force_lin_body
-
-            
+    

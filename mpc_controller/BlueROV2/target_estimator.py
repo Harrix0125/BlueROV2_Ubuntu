@@ -65,7 +65,8 @@ class VisualTarget:
         distance = np.sqrt(dx**2 + dy**2 + dz**2)
 
         if self.check_visibility(rov_state):
-            self.seen_state = self.true_state[0:3] + camera_noise*distance
+            mult_noise = distance ** (np.log(10) / np.log(2.2))
+            self.seen_state = self.true_state[0:3] + camera_noise*mult_noise
             measurement = self.true_state[0:3]
             self.kf.update(self.seen_state)
             self.last_seen_t = 0
@@ -89,7 +90,7 @@ class VisualTarget:
 
 
 class TargetTrackerKF:
-    def __init__(self, dt_default=0.1, process_noise=0.05, measure_noise=5):
+    def __init__(self, dt_default=0.1, process_noise=0.05, measure_noise=0.5):
         """
             K filter for 3D position + velocity tracking.
             state vector x :[x, y, z, vx, vy, vz]
@@ -120,7 +121,7 @@ class TargetTrackerKF:
         self.Q = np.eye(self.n_states) * process_noise
 
         # Measurement Noise Covariance
-        self.R = np.eye(self.n_meas) * measure_noise
+        self.R = np.eye(self.n_meas)* measure_noise
 
         self.I = np.eye(self.n_states)
 

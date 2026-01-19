@@ -115,21 +115,21 @@ class AEKFD():
         beta = 1.0
         gamma = 1.0
         nis_threshold = 12.0
-        nis = self.check_outlier(y_k, S_k)
-        # We pass y_k (already wrapped) and S_k (includes R)
-        if (nis > 26.2): # Threshold for ~12 DOF
-            # REJECT: Return the predicted state as-is
-            print("Outlier rejected")
-            return self.x_est
-        elif (nis > nis_threshold):
-            print("NIS greater than trheshold", nis)
-            beta = 1 + gamma*(nis - nis_threshold)
-            beta = min(beta,100)
+        # nis = self.check_outlier(y_k, S_k)
+        # # We pass y_k (already wrapped) and S_k (includes R)
+        # if (nis > 26.2): # Threshold for ~12 DOF
+        #     # REJECT: Return the predicted state as-is
+        #     print("Outlier rejected")
+        #     return self.x_est
+        # elif (nis > nis_threshold):
+        #     print("NIS greater than trheshold", nis)
+        #     beta = 1 + gamma*(nis - nis_threshold)
+        #     beta = min(beta,100)
 
-            # Re-calculate self.P_est
-            self.P_est =self.P_est*beta
-            # Re-calculate S_k
-            S_k = H @ self.P_est @ H.T + self.R
+        #     # Re-calculate self.P_est
+        #     self.P_est =self.P_est*beta
+        #     # Re-calculate S_k
+        #     S_k = H @ self.P_est @ H.T + self.R
 
         # Calculate Kalman Gain
         K_k = self.P_est @ H.T @ np.linalg.inv(S_k)

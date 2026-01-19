@@ -46,7 +46,7 @@ def simulation():
     u_previous = np.zeros(my_params.nu)
     MAX_DELTA = my_params.THRUST_MAX * my_params.T_s *1000
 
-    t_simulation = 20 #sec
+    t_simulation = 30 #sec
     steps_tot = int(t_simulation /  my_params.T_s)
 
     # Assuming that this is the data we get from our ideal camera system
@@ -74,8 +74,8 @@ def simulation():
     noise_ekf = my_params.noise_ekf if is_there_noise else np.array([0.0]*12)    
     print("noise_ekf:", noise_ekf)
     # Camera Model Setup
-    camera_data = VisualTarget(start_state=state_moving[0,:], fov_h=90, fov_v=80, max_dist=10)
-    camera_noise = np.random.normal(0, 0.06, 3) if is_there_noise else np.array([0.0]*3)
+    camera_data = VisualTarget(start_state=state_moving[0,:], fov_h=my_params.fov_h, fov_v=my_params.fov_v, max_dist=10)
+    camera_noise = np.random.normal(0, 0.006, 3) if is_there_noise else np.array([0.0]*3)
     seen_it_once = False
     wait_here = np.copy(state_now[0:12])
 
@@ -101,8 +101,9 @@ def simulation():
                 est_target_vel = est_target[3:6]
 
                 # Get guidance reference
-                ref_guidance = sim.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2)
+                #ref_guidance = sim.get_shadow_traj(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
 
+                ref_guidance = sim.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
             elif not is_visible and seen_it_once:
 
                 # Visible before but not now: use last seen position
@@ -122,7 +123,7 @@ def simulation():
             else:
                 # Not visible and never seen: stay still till i see something
                 ref_guidance = wait_here[0:12]
-            
+
             # Solve NMPC
             u_optimal = solver.solve(state_est, ref_guidance,  disturbance=estimated_disturbance)
             u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
@@ -171,16 +172,16 @@ def simulation():
             EKFtraj_theta.append(state_est[4]) # Pitch
             EKFtraj_psi.append(state_est[5])   # Yaw
 
-            ref_x.append(ref_guidance[0])
-            ref_y.append(ref_guidance[1])
-            ref_z.append(ref_guidance[2])
+            ref_safe = np.atleast_2d(ref_guidance)  
+            ref_x.append(ref_safe[0, 0])
+            ref_y.append(ref_safe[0, 1])
+            ref_z.append(ref_safe[0, 2])
             if is_visible:
                 target_estimation_x.append(est_target_pos[0])
                 target_estimation_y.append(est_target_pos[1])
                 target_estimation_z.append(est_target_pos[2])
-            
-            print(camera_noise)
-            camera_noise = np.random.normal(0, 0.06, 3)
+
+            camera_noise = np.random.normal(0, 0.006, 3)
 
 
     elif round == 3:

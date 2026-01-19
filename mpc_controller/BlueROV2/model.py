@@ -38,7 +38,7 @@ def export_vehicle_model(params):
 
     phi, theta, psi = eta[3], eta[4], eta[5]
     
-    diff = W - B
+    diff = B-W
     g_vec = cas.vertcat(
         -diff * cas.sin(theta),
         diff * cas.cos(theta) * cas.sin(phi),
@@ -52,10 +52,10 @@ def export_vehicle_model(params):
     tau = cas.mtimes(TAM, u_ctrl)
     D_total = D_lin + D_quad
     
-    coriolis_matrix = get_C_SX(nu, params)
+    #coriolis_matrix = get_C_SX(nu, params) (not in Gazebo?)
 
-    # Forces sum : tau - (D + C) * nu - g + disturbance (=p_dist)
-    forces_sum = tau - cas.mtimes((D_total+coriolis_matrix), nu) - g_vec + p_dist
+    # Forces sum : tau - cas.mtimes((D_total + coriolis_matrix), nu) - g_vec+ p_dist
+    forces_sum = tau - cas.mtimes((D_total ), nu) - g_vec + p_dist
     nu_dot = cas.mtimes(M_inv, forces_sum)
 
     J1 = get_J1(phi, theta, psi) # Ensure utils returns SX compatible logic
@@ -145,4 +145,4 @@ def get_C_SX(nu, params):
     C_a[4, 5] = -b1;   C_a[4, 3] = -b3;  C_a[4, 2] =  a1;  C_a[4, 0] = -a3
     C_a[5, 4] =  b1;   C_a[5, 3] =  b2;  C_a[5, 1] = -a1;  C_a[5, 0] =  a2
 
-    return C_rb + C_a
+    return  C_rb + C_a
