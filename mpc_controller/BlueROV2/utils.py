@@ -6,143 +6,6 @@ class Vehicle_Utils:
     def __init__(self, params):
         self.p = params
 
-    def get_error_dynamics(self, model, target_state):
-        """
-        model: The AcadosModel object you created (to access model.x)
-        target_state: Symbolic variable (SX) for the target's state [x, y, z, phi, theta, psi, u, v, w, p, q, r]
-        """
-        
-        # 1. Unpack ROV State (from model.x)
-        # Positions (not needed for rotation, but needed for error calc)
-        p_rov = model.x[0:3]
-        # Attitudes (phi, theta, psi)
-        eta_rov = model.x[3:6]
-        # Velocities (u, v, w)
-        nu_rov = model.x[6:9] 
-        
-        # 2. Unpack Target State (passed as an argument or parameter)
-        p_target = target_state[0:3]
-        eta_target = target_state[3:6] # [phi_t, theta_t, psi_t]
-        nu_target = target_state[6:9]  # [u_t, v_t, w_t]
-        omega_target = target_state[9:12] # [p_t, q_t, r_t] Angular velocities
-        
-        # 3. Get Rotation Matrices using YOUR utils function
-        # R_rov: Rotates ROV Body -> World
-        R_rov = self.get_J1(eta_rov[0], eta_rov[1], eta_rov[2])
-        
-        # R_t: Rotates Target Body -> World
-        R_t = self.get_J1(eta_target[0], eta_target[1], eta_target[2])
-        
-        # 4. Calculate Position Error in Target Frame
-        # epsilon = R_t.T * (p_rov - p_target)
-        p_error_global = p_rov - p_target
-        epsilon = cas.mtimes(R_t.T, p_error_global)
-
-        # 5. Define Skew-Symmetric Matrix for Target Angular Velocity (S(w))
-        # This is needed for the rotational derivative part: -S(w) * epsilon
-        S_omega = cas.SX.zeros(3, 3)
-        S_omega[0, 1] = -omega_target[2] # -r
-        S_omega[0, 2] =  omega_target[1] #  q
-        S_omega[1, 0] =  omega_target[2] #  r
-        S_omega[1, 2] = -omega_target[0] # -p
-        S_omega[2, 0] = -omega_target[1] # -q
-        S_omega[2, 1] =  omega_target[0] #  p
-
-        # 6. Calculate Error Dynamics (epsilon_dot)
-        # eq: dot_epsilon = -S(w)*epsilon + (R_t.T * R_rov * nu_rov) - nu_target
-        
-        # Term 1: Rotation effect due to target turning
-        term_1 = -cas.mtimes(S_omega, epsilon)
-        
-        # Term 2: Velocity difference projected into Target Frame
-        # R_rel = R_t^T * R_rov
-        R_rel = cas.mtimes(R_t.T, R_rov) 
-        
-        # Velocity of ROV seen in Target Frame
-        v_rov_in_target_frame = cas.mtimes(R_rel, nu_rov)
-        
-        term_2 = v_rov_in_target_frame - nu_target
-        
-        epsilon_dot = term_1 + term_2
-        
-        return epsilon, epsilon_dot
-
-    def get_standoff_reference(self, rov_state, target_state, desired_dist=2.0, lookahead=1.0, time_predict=1.8):
-        """
-        Calculates a 'Virtual Reference' for the NMPC to track.
-        This creates a carrot-stick approach to maintain distance.
-        """
-        # Unpack positions
-        x_r, y_r, z_r = rov_state[0], rov_state[1], rov_state[2]
-        x_t, y_t, z_t = target_state[0], target_state[1], target_state[2]
-        
-        # Distance and Bearing to Target
-        dx = x_t - x_r
-        dy = y_t - y_r
-        dz = z_t - z_r
-        dist_3d = np.linalg.norm([dx, dy, dz])
-        dist_plane = np.linalg.norm([dx, dy])
-        pitch_d = np.arctan2(-dz, dist_plane)
-        yaw_d = np.arctan2(dy, dx)
-        if abs(dist_plane) < 0.01:
-            yaw_d = 0.0  # Prevent NaN when directly above/below
-        #elif abs(dist_3d) < 2:
-        #    yaw_d = yaw_d**3  # Slow down yaw changes when very close
-
-        if abs(dist_3d) < 0.01:
-            pitch_d = 0.0  # Prevent NaN when at same position
-        #elif abs(dist_3d) < 2:
-        #    pitch_d = pitch_d**3  # Slow down pitch changes when very close
-
-        # Distance Controller?
-        u_speed = 1.3
-        w_speed = 1.3
-        z_speed = w_speed * (dz)
-        x_speed = u_speed * (dist_3d - desired_dist) 
-
-        u_des = np.cos(rov_state[4])*x_speed + np.sin(rov_state[4])*z_speed
-        w_des = -np.sin(rov_state[4])*x_speed + np.cos(rov_state[4])*z_speed
-
-        # Clamp speed for safety (e.g., max 0.5 m/s)
-        #u_des = np.clip(u_des, -0.9, 1.9)
-        
-        # Line of Sight: simply look at the target
-        psi_des = yaw_d
-        
-        # Create the "Virtual Carrot" Position
-        # We place a reference point 'lookahead' meters away in the desired direction
-        # This tricks the Position-Weighted NMPC into moving that way.
-        x_ref = x_r + lookahead * np.cos(psi_des)
-        y_ref = y_r + lookahead * np.sin(psi_des)
-        
-        # If we want to STOP (u_des ~ 0), we should set reference to current position
-        # But if we want to move, we project it. 
-        # A cleaner way for NMPC: Set ref pos based on u_des
-        x_ref = x_r + (x_speed * time_predict) * np.cos(psi_des)
-        y_ref = y_r + (x_speed * time_predict) * np.sin(psi_des)
-        z_ref = z_r + (z_speed * time_predict)
-        # But to maintain depth relative to target, we can also do:
-
-        # Build the Reference State Vector (12,)
-        # [x, y, z, phi, theta, psi, u, v, w, p, q, r]
-        ref_state = np.zeros(12)
-        ref_state[0] = x_ref
-        ref_state[1] = y_ref
-        ref_state[2] = target_state[2] # Match target depth
-        ref_state[2] = z_ref
-        ref_state[3] = 0 # Roll 0
-        ref_state[4] = pitch_d
-        ref_state[5] = psi_des # DESIRED HEADING
-        ref_state[6] = u_des   # DESIRED SURGE
-
-        ref_state[8] = w_des  # Desired Heave
-
-
-        ref_state[11] = (psi_des-rov_state[5]) / 10
-
-        # Rest are zero
-        return ref_state
-
     def get_shadow_ref(self, rov_state, target_state, target_vel = None, desired_dist = 2.0):
         """
         Calculates the 'Ideal State' (Shadow) for the NMPC to track.
@@ -167,7 +30,7 @@ class Vehicle_Utils:
 
         p_reference = p_target + direction_vect * desired_dist
 
-        # Ideal velocity:
+
         v_ref_global = v_target_global
         
         # Defining orientation with ROV facing the target:
@@ -176,7 +39,7 @@ class Vehicle_Utils:
 
         diff = yaw_des - rov_state[5]
         if abs(diff) > np.pi:
-            # If error is big due to wrapping, shift the REFERENCE to match the ROV
+            # If error is big due to wrapping, shift the ref to match the ROV i think
             if diff > np.pi:
                 yaw_des -= 2 * np.pi
             elif diff < -np.pi:
@@ -185,15 +48,13 @@ class Vehicle_Utils:
         dist_plane = np.linalg.norm(target_pointing_vector[0:2])
         pitch_des = np.arctan2(-target_pointing_vector[2], dist_plane)
 
-        # Transforming to body frame:
         c_psi = np.cos(yaw_des)
         s_psi = np.sin(yaw_des)
-
         u_ref = v_ref_global[0] * c_psi + v_ref_global[1] * s_psi
         v_ref = -v_ref_global[0] * s_psi + v_ref_global[1] * c_psi
         w_ref = v_ref_global[2]
-        # Build the Reference State Vector (12,)
-        # [x, y, z, phi, theta, psi, u, v, w, p, q, r]
+        
+
         ref_state = np.zeros(12)
         ref_state[0] = p_reference[0]
         ref_state[1] = p_reference[1]
@@ -211,40 +72,26 @@ class Vehicle_Utils:
         """
         Generates a list of N reference states (The Trajectory) for the NMPC.
         """
-        # 1. Get the current 'Shadow' (Reference at t=0) using your existing logic
-        # This ensures the trajectory starts exactly where you want it to start.
         ref_state_t0 = self.get_shadow_ref(rov_state, target_state, target_vel, desired_dist)
         
-        # Extract the starting position and ideal velocity of the shadow
-        p_ref_current = ref_state_t0[0:3]       # [x, y, z]
-        v_ref_current = np.array([ref_state_t0[6], ref_state_t0[7], ref_state_t0[8]]) # [u, v, w] (Body or Global? See note below)
         
-        # NOTE: Your get_shadow_ref transforms velocities to Body Frame (u, v, w).
-        # For propagation, it's easier to work in Global Frame first, then convert back.
-        # So let's use the target's global velocity which you already passed in.
+        p_ref_current = ref_state_t0[0:3]
+        v_ref_current = np.array([ref_state_t0[6], ref_state_t0[7], ref_state_t0[8]])
         v_global_propagation = target_vel if target_vel is not None else np.zeros(3)
 
         trajectory = []
 
-        # 2. Loop to generate the future points
+        # Loop to generate the future points
         for k in range(int(horizon_N/5)):
-            # Time step into the future
+            
             time_offset = k * dt
             
-            # PROPAGATE: Future Position = Start + Velocity * Time
+            
             # We assume the target moves at constant velocity, so the shadow does too.
             p_ref_future = p_ref_current + v_global_propagation * time_offset
             
-            # Create a copy of the t0 reference state to fill in the future values
             ref_state_k = ref_state_t0.copy()
-            
-            # Update the position in the state vector
             ref_state_k[0:3] = p_ref_future
-
-            # OPTIONAL: If you want to predict yaw changes (e.g. if target_vel changes direction),
-            # you would update ref_state_k[5] (Yaw) here. 
-            # For a diver, keeping the t0 orientation or aligning with velocity is standard.
-            
             trajectory.append(ref_state_k)
 
         return np.array(trajectory) # Shape (N, 12)
@@ -321,81 +168,81 @@ class Vehicle_Utils:
             [0, sphi / cth,    cphi / cth]
         ])
         return J2
-    def get_C_cas(self, nu):
-        C_rb = cas.MX.zeros(6, 6)
-        # Row 0
-        C_rb[0, 4] =  self.p.m * nu[2];  C_rb[0, 5] = -self.p.m * nu[1]
-        # Row 1
-        C_rb[1, 3] = -self.p.m * nu[2];  C_rb[1, 5] =  self.p.m * nu[0]
-        # Row 2
-        C_rb[2, 3] =  self.p.m * nu[1];  C_rb[2, 4] = -self.p.m * nu[0]
-        C_rb[3, 1] =  self.p.m * nu[2];  C_rb[3, 2] = -self.p.m * nu[1]; C_rb[3, 4] = self.p.Iz * nu[5]; C_rb[3, 5] = -self.p.Iy * nu[4]
-        C_rb[4, 0] = -self.p.m * nu[2];  C_rb[4, 2] =  self.p.m * nu[0]; C_rb[4, 3] = -self.p.Iz * nu[5]; C_rb[4, 5] = self.p.Ix * nu[3]
-        C_rb[5, 0] =  self.p.m * nu[1];  C_rb[5, 1] = -self.p.m * nu[0]; C_rb[5, 3] = self.p.Iy * nu[4]; C_rb[5, 4] = -self.p.Ix * nu[3]
+    # def get_C_cas(self, nu):
+    #     C_rb = cas.MX.zeros(6, 6)
+    #     # Row 0
+    #     C_rb[0, 4] =  self.p.m * nu[2];  C_rb[0, 5] = -self.p.m * nu[1]
+    #     # Row 1
+    #     C_rb[1, 3] = -self.p.m * nu[2];  C_rb[1, 5] =  self.p.m * nu[0]
+    #     # Row 2
+    #     C_rb[2, 3] =  self.p.m * nu[1];  C_rb[2, 4] = -self.p.m * nu[0]
+    #     C_rb[3, 1] =  self.p.m * nu[2];  C_rb[3, 2] = -self.p.m * nu[1]; C_rb[3, 4] = self.p.Iz * nu[5]; C_rb[3, 5] = -self.p.Iy * nu[4]
+    #     C_rb[4, 0] = -self.p.m * nu[2];  C_rb[4, 2] =  self.p.m * nu[0]; C_rb[4, 3] = -self.p.Iz * nu[5]; C_rb[4, 5] = self.p.Ix * nu[3]
+    #     C_rb[5, 0] =  self.p.m * nu[1];  C_rb[5, 1] = -self.p.m * nu[0]; C_rb[5, 3] = self.p.Iy * nu[4]; C_rb[5, 4] = -self.p.Ix * nu[3]
 
-        C_a = cas.MX.zeros(6, 6)
-        C_a[0, 4] = -self.p.Z_wd * nu[2]; C_a[0, 5] =  self.p.Y_vd * nu[1]
-        C_a[1, 3] =  self.p.Z_wd * nu[2]; C_a[1, 5] = -self.p.X_ud * nu[0]
-        C_a[2, 3] = -self.p.Y_vd * nu[1]; C_a[2, 4] =  self.p.X_ud * nu[0]
-        C_a[3, 1] = -self.p.Z_wd * nu[2]; C_a[3, 2] =  self.p.Y_vd * nu[1]; C_a[3, 4] = -self.p.N_rd * nu[5]; C_a[3, 5] = self.p.M_qd * nu[4]
-        C_a[4, 0] =  self.p.Z_wd * nu[2]; C_a[4, 2] = -self.p.X_ud * nu[0]; C_a[4, 3] =  self.p.N_rd * nu[5]; C_a[4, 5] = -self.p.K_pd * nu[3]
-        C_a[5, 0] = -self.p.Y_vd * nu[1]; C_a[5, 1] =  self.p.X_ud * nu[0]; C_a[5, 3] = -self.p.M_qd * nu[4]; C_a[5, 4] = self.p.K_pd * nu[3]
+    #     C_a = cas.MX.zeros(6, 6)
+    #     C_a[0, 4] = -self.p.Z_wd * nu[2]; C_a[0, 5] =  self.p.Y_vd * nu[1]
+    #     C_a[1, 3] =  self.p.Z_wd * nu[2]; C_a[1, 5] = -self.p.X_ud * nu[0]
+    #     C_a[2, 3] = -self.p.Y_vd * nu[1]; C_a[2, 4] =  self.p.X_ud * nu[0]
+    #     C_a[3, 1] = -self.p.Z_wd * nu[2]; C_a[3, 2] =  self.p.Y_vd * nu[1]; C_a[3, 4] = -self.p.N_rd * nu[5]; C_a[3, 5] = self.p.M_qd * nu[4]
+    #     C_a[4, 0] =  self.p.Z_wd * nu[2]; C_a[4, 2] = -self.p.X_ud * nu[0]; C_a[4, 3] =  self.p.N_rd * nu[5]; C_a[4, 5] = -self.p.K_pd * nu[3]
+    #     C_a[5, 0] = -self.p.Y_vd * nu[1]; C_a[5, 1] =  self.p.X_ud * nu[0]; C_a[5, 3] = -self.p.M_qd * nu[4]; C_a[5, 4] = self.p.K_pd * nu[3]
 
-        coriolis_sum = C_rb 
+    #     coriolis_sum = C_rb 
 
-        return coriolis_sum
-    def get_C_SX(self, nu):
-        """
-        Computes Coriolis matrix using strictly CasADi SX types 
-        to match the model definition.
-        """
-        # 1. Create Empty SX Matrix (NOT np.zeros, NOT MX.zeros)
-        C_rb = cas.SX.zeros(6, 6)
+    #     return coriolis_sum
+    # def get_C_SX(self, nu):
+    #     """
+    #     Computes Coriolis matrix using strictly CasADi SX types 
+    #     to match the model definition.
+    #     """
+    #     # 1. Create Empty SX Matrix (NOT np.zeros, NOT MX.zeros)
+    #     C_rb = cas.SX.zeros(6, 6)
         
-        m = self.p.m
-        # Use explicit float casting for constants to be safe
-        Ix, Iy, Iz = float(self.p.Ix), float(self.p.Iy), float(self.p.Iz)
+    #     m = self.p.m
+    #     # Use explicit float casting for constants to be safe
+    #     Ix, Iy, Iz = float(self.p.Ix), float(self.p.Iy), float(self.p.Iz)
         
-        # 2. Fill Rigid Body Coriolis (Standard SNAME)
-        # Note: We access nu by index directly
-        u, v, w = nu[0], nu[1], nu[2]
-        p, q, r = nu[3], nu[4], nu[5]
+    #     # 2. Fill Rigid Body Coriolis (Standard SNAME)
+    #     # Note: We access nu by index directly
+    #     u, v, w = nu[0], nu[1], nu[2]
+    #     p, q, r = nu[3], nu[4], nu[5]
 
-        # Row 0
-        C_rb[0, 4] =  m * w;   C_rb[0, 5] = -m * v
-        # Row 1
-        C_rb[1, 3] = -m * w;   C_rb[1, 5] =  m * u
-        # Row 2
-        C_rb[2, 3] =  m * v;   C_rb[2, 4] = -m * u
-        # Row 3
-        C_rb[3, 1] = -m * w;   C_rb[3, 2] =  m * v;   C_rb[3, 4] =  Iz * r;   C_rb[3, 5] = -Iy * q
-        # Row 4
-        C_rb[4, 0] =  m * w;   C_rb[4, 2] = -m * u;   C_rb[4, 3] = -Iz * r;   C_rb[4, 5] =  Ix * p
-        # Row 5
-        C_rb[5, 0] = -m * v;   C_rb[5, 1] =  m * u;   C_rb[5, 3] =  Iy * q;   C_rb[5, 4] = -Ix * p
+    #     # Row 0
+    #     C_rb[0, 4] =  m * w;   C_rb[0, 5] = -m * v
+    #     # Row 1
+    #     C_rb[1, 3] = -m * w;   C_rb[1, 5] =  m * u
+    #     # Row 2
+    #     C_rb[2, 3] =  m * v;   C_rb[2, 4] = -m * u
+    #     # Row 3
+    #     C_rb[3, 1] = -m * w;   C_rb[3, 2] =  m * v;   C_rb[3, 4] =  Iz * r;   C_rb[3, 5] = -Iy * q
+    #     # Row 4
+    #     C_rb[4, 0] =  m * w;   C_rb[4, 2] = -m * u;   C_rb[4, 3] = -Iz * r;   C_rb[4, 5] =  Ix * p
+    #     # Row 5
+    #     C_rb[5, 0] = -m * v;   C_rb[5, 1] =  m * u;   C_rb[5, 3] =  Iy * q;   C_rb[5, 4] = -Ix * p
         
-        # 3. Added Mass Coriolis (C_a)
-        C_a = cas.SX.zeros(6, 6)
-        Xud, Yvd, Zwd = float(self.p.X_ud), float(self.p.Y_vd), float(self.p.Z_wd)
-        Kpd, Mqd, Nrd = float(self.p.K_pd), float(self.p.M_qd), float(self.p.N_rd)
+    #     # 3. Added Mass Coriolis (C_a)
+    #     C_a = cas.SX.zeros(6, 6)
+    #     Xud, Yvd, Zwd = float(self.p.X_ud), float(self.p.Y_vd), float(self.p.Z_wd)
+    #     Kpd, Mqd, Nrd = float(self.p.K_pd), float(self.p.M_qd), float(self.p.N_rd)
 
-        # Approximated diagonal Added Mass Coriolis
-        # (Check your specific notation signs, these follow Fossen generally)
-        a1, a2, a3 = Xud*u, Yvd*v, Zwd*w
-        b1, b2, b3 = Kpd*p, Mqd*q, Nrd*r
+    #     # Approximated diagonal Added Mass Coriolis
+    #     # (Check your specific notation signs, these follow Fossen generally)
+    #     a1, a2, a3 = Xud*u, Yvd*v, Zwd*w
+    #     b1, b2, b3 = Kpd*p, Mqd*q, Nrd*r
 
-        C_a[0, 5] = -a2;   C_a[0, 4] =  a3
-        C_a[1, 5] =  a1;   C_a[1, 3] = -a3
-        C_a[2, 4] = -a1;   C_a[2, 3] =  a2
+    #     C_a[0, 5] = -a2;   C_a[0, 4] =  a3
+    #     C_a[1, 5] =  a1;   C_a[1, 3] = -a3
+    #     C_a[2, 4] = -a1;   C_a[2, 3] =  a2
 
-        C_a[3, 5] = -b2;   C_a[3, 4] =  b3;  C_a[3, 2] = -a2;  C_a[3, 1] =  a3
-        C_a[4, 5] = -b1;   C_a[4, 3] = -b3;  C_a[4, 2] =  a1;  C_a[4, 0] = -a3
-        C_a[5, 4] =  b1;   C_a[5, 3] =  b2;  C_a[5, 1] = -a1;  C_a[5, 0] =  a2
+    #     C_a[3, 5] = -b2;   C_a[3, 4] =  b3;  C_a[3, 2] = -a2;  C_a[3, 1] =  a3
+    #     C_a[4, 5] = -b1;   C_a[4, 3] = -b3;  C_a[4, 2] =  a1;  C_a[4, 0] = -a3
+    #     C_a[5, 4] =  b1;   C_a[5, 3] =  b2;  C_a[5, 1] = -a1;  C_a[5, 0] =  a2
 
-        # Note: C_np had some sign diffs and transposition relative to standard Fossen.
-        # Ensure this matches your specific model notation (SNAME vs Fossen 1994).
+    #     # Note: C_np had some sign diffs and transposition relative to standard Fossen.
+    #     # Ensure this matches your specific model notation (SNAME vs Fossen 1994).
         
-        return C_rb + C_a
+    #     return C_rb + C_a
 
     def get_C_np(self, nu):
         C_rb = np.zeros((6, 6))
@@ -417,7 +264,7 @@ class Vehicle_Utils:
         C_a[4, 0] =  self.p.Z_wd * nu[2]; C_a[4, 2] = -self.p.X_ud * nu[0]; C_a[4, 3] =  self.p.N_rd * nu[5]; C_a[4, 5] = -self.p.K_pd * nu[3]
         C_a[5, 0] = -self.p.Y_vd * nu[1]; C_a[5, 1] =  self.p.X_ud * nu[0]; C_a[5, 3] = -self.p.M_qd * nu[4]; C_a[5, 4] = self.p.K_pd * nu[3]
 
-        coriolis_sum = C_rb + C_a
+        coriolis_sum =  C_a + C_rb
 
         return coriolis_sum
 
@@ -427,25 +274,15 @@ class Vehicle_Utils:
         """
         if disturbance is None:
             disturbance = np.zeros(6)
-        # 1. Unpack State
-        eta = x_state[0:6]   # [x, y, z, phi, theta, psi]
-        nu  = x_state[6:12]  # [u, v, w, p, q, r]
+        eta = x_state[0:6]
+        nu  = x_state[6:12]
         
         phi, theta, psi = eta[3], eta[4], eta[5]
 
-        # 2. Forces
-        # Thruster Forces
         tau = self.p.TAM @ u_control
-        
-        # Linear Damping
         damping_lin = self.p.D_LIN @ nu
-        
-        # Quadratic Damping (Element-wise calculation)
-        # Using abs() ensures drag always opposes motion
         dq_diag = np.abs(nu) * self.p.D_QUAD_COEFFS 
         damping_quad = dq_diag * nu 
-        
-        # Restoring Forces (Gravity/Buoyancy)
         W, B, zg = self.p.W, self.p.B, self.p.zg
         diff = W - B
         
@@ -458,26 +295,17 @@ class Vehicle_Utils:
             0.0
         ])
 
-        # Coriolis (Using the Numpy version)
-        # Ensure get_C_np returns a numpy array, not CasADi
+        # Coriolis???
         C_mat = self.get_C_np(nu) 
         coriolis_force = C_mat @ nu
-
-        # 3. Acceleration Dynamics: M * acc = Sum_Forces
-        # Total Force in Body Frame
         total_force = tau - damping_lin - damping_quad - g_force - coriolis_force + disturbance
-        
-        # Body Acceleration
         acc = self.p.M_INV @ total_force
 
-        # 4. Kinematics: Velocities -> Pos/Angle rates
         J1 = self.get_J1_np(phi, theta, psi)
         J2 = self.get_J2_np(phi, theta, psi)
-        
         pos_dot = J1 @ nu[0:3]
         att_dot = J2 @ nu[3:6]
         
-        # Stack result [pos_dot, att_dot, acc]
         return np.concatenate((pos_dot, att_dot, acc))
 
     def robot_plant_step_RK4(self, x_current, u_control, dt, disturbance = None):
@@ -488,7 +316,7 @@ class Vehicle_Utils:
         if disturbance is None:
             disturbance = np.zeros(6)
 
-        # RK4 Integration
+        # RK4 here
         k1 = self.get_x_dot(x_current, u_control, disturbance)
         k2 = self.get_x_dot(x_current + 0.5 * dt * k1, u_control, disturbance)
         k3 = self.get_x_dot(x_current + 0.5 * dt * k2, u_control, disturbance)
@@ -502,19 +330,11 @@ class Vehicle_Utils:
         """
         Simulates the robot moving for one time step using NumPy.
         """
-        # 1. Unpack State
-        eta = x_current[0:6]  # Pos [x,y,z, phi,theta,psi]
-        nu  = x_current[6:12] # Vel [u,v,w, p,q,r] (Body Frame)
+        eta = x_current[0:6]
+        nu  = x_current[6:12]
     
-        # 2. Forces
-        # Thruster Forces (Tau = TAM * u)
         tau = self.p.TAM @ u_control
-        
-        # Linear Damping (Drag) = D_lin * nu
         damping_force = self.p.D_LIN @ nu
-        
-        #   ALSO MISSING C
-        # Restoring Forces (Gravity/Buoyancy) - Simplified for test
         W = self.p.W
         B = self.p.B
         zg = self.p.zg
@@ -528,22 +348,17 @@ class Vehicle_Utils:
             zg * W * cas.sin(x_current[5]),
             0
         ])
-
         coriolis_sum = self.get_C_np(nu)
         coriolis_force = coriolis_sum @ nu
-
-        # 3. Acceleration (M * acc = Sum_Forces)
         total_force = tau - damping_force - g_force - coriolis_force
         acc = self.p.M_INV @ total_force
-        
-        # 4. Kinematics (Vel Body -> Vel World)
+
         J1 = self.get_J1(eta[3], eta[4], eta[5])
         J2 = self.get_J2(eta[3], eta[4], eta[5])
         pos_dot = J1 @ nu[0:3]
         att_dot = J2 @nu[3:6] 
 
-        # 5. Integration (Euler)
-        #x_next = cas.SX.zeros(12)
+        # Integration
         x_next = np.zeros(12)
         x_next[0:3] = np.squeeze(eta[0:3] + pos_dot[0:3] * dt)
         x_next[3:6] = np.squeeze(eta[3:6] + att_dot[0:3] * dt)
@@ -583,15 +398,8 @@ class Vehicle_Utils:
         Returns: numpy array of shape (steps, 12)
         States: [x, y, z, phi, theta, psi, u, v, w, p, q, r]
         """
-        
-        # Initialize State Matrix (steps x 12)
-        # Col 0-2: Pos (x, y, z)
-        # Col 3-5: Angle (phi, theta, psi)
-        # Col 6-8: LinVel Body (u, v, w)
-        # Col 9-11: AngVel Body (p, q, r)
         states = np.zeros((steps, 12))
         
-        # Initial Conditions
         states[0,0] = 0
         states[0,1] = -6
         states[0,2] = -0.5
@@ -607,15 +415,12 @@ class Vehicle_Utils:
         current_theta = states[0, 4] # Pitch
 
         for k in range(steps - 1):
-            # --- 1. Generate Control Inputs (Steering) ---
-            # We simulate "commands" to turn the target
-            # Randomize Yaw Rate (r) - Turning left/right
+            # rnd Yaw (r) L/R
             target_r = -0.1*np.sin(0.004*k) + 0.08*np.sin(0.0003*k)  #turning L/R
             target_r = -0.25*np.sin(0.004*k) + 0.1*np.cos(0.003*k)  #crazier traj
 
 
-            # Randomize Pitch Rate (q) - Diving/Surfacing
-            # Keep it small and spring-loaded to return to horizon
+            # rnd Pitch (q) Up/DOwn
             target_q = np.random.normal(0.0, 0.1) - (current_theta * 0.1)
             #target_q = 0
             
@@ -623,16 +428,10 @@ class Vehicle_Utils:
             # Roll (p) is usually 0 for a stable target
             target_p = 0.0
             
-            # Surge Speed (u) - Mostly constant forward motion
             target_u = speed + np.random.normal(0.0, 0.8)
-            
-            # Sway (v) and Heave (w) are 0 (assuming target moves forward)
             target_v = 0.0
             target_w = 0.0
 
-            # --- 2. Fill Velocity States (Body Frame) ---
-            # In a real dynamic model, forces cause these. 
-            # Here we just set them kinematically for the reference.
             states[k+1, 6] = target_u
             states[k+1, 7] = target_v
             states[k+1, 8] = target_w
@@ -640,8 +439,6 @@ class Vehicle_Utils:
             states[k+1, 10] = target_q
             states[k+1, 11] = target_r
 
-            # --- 3. Update Angles (Euler Integration) ---
-            # Update Yaw and Pitch based on rates
             current_psi += target_r * dt
             current_theta += target_q * dt
             
@@ -649,18 +446,10 @@ class Vehicle_Utils:
             states[k+1, 4] = current_theta
             states[k+1, 5] = current_psi
 
-            # --- 4. Update Position (World Frame) ---
-            # We must rotate Body Velocity (u,v,w) into World Velocity (dx, dy, dz)
-            # Using standard Rotation Matrix for Yaw (psi) and Pitch (theta)
-            
-            # Simplified Rotation (assuming small Roll)
-            # dx = u * cos(theta) * cos(psi)
+
+
             dx = target_u * np.cos(current_theta) * np.cos(current_psi)
-            
-            # dy = u * cos(theta) * sin(psi)
             dy = target_u * np.cos(current_theta) * np.sin(current_psi)
-            
-            # dz = -u * sin(theta) (Negative because Z is Down)
             dz = -target_u * np.sin(current_theta)
 
             current_x += dx * dt

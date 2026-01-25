@@ -18,9 +18,6 @@ class BlueROV_Params(NMPC_params):
         self.B = 114.8           # buoyancy [N]
         self.g = 9.82            # gravity [m/s^2]
         # For gazebo data (It would be easy to get data for real world ROV aswell, at least for the mass as it is sufficient to weight it and there would be low error)
-        self.m = 13
-        self.W = self.m * self.g
-        self.B = 13.14 * self.g
 
         self.fov_h = 90
         self.fov_v = 80
@@ -46,13 +43,192 @@ class BlueROV_Params(NMPC_params):
         self.K_pd = -0.12
         self.M_qd = -0.12
         self.N_rd = -0.12
-        # Set to zero for Gazebo Simulation! be careful
-        self.X_ud = 0
-        self.Y_vd = 0
-        self.Z_wd = 0
-        self.K_pd = 0
-        self.M_qd = 0
-        self.N_rd = 0
+
+        # Linear Damping
+        self.X_u = -4.03
+        self.Y_v = -6.22
+        self.Z_w = -5.18
+        self.K_p = -0.07
+        self.M_q = -0.07
+        self.N_r = -0.07
+
+        # Quadratic Damping (Drag)
+        self.X_uu = -18.18
+        self.Y_vv = -21.66
+        self.Z_ww = -36.99
+        self.K_pp = -1.55
+        self.M_qq = -1.55
+        self.N_rr = -1.55
+        
+        # Rigid Body self.mass self.matrix (Mrb)
+        # self.mATLAB: [m, 0, 0, 0, self.m*zg, 0; ...]
+        self.Mrb = np.array([
+            [self.m, 0, 0, 0, self.m*self.zg, -self.m*self.yg],
+            [0, self.m, 0, -self.m*self.zg, 0, self.m*self.xg],
+            [0, 0, self.m, self.m*self.yg, -self.m*self.xg, 0],
+            [0, -self.m*self.zg, self.m*self.yg, self.Ix, 0, 0],
+            [self.m*self.zg, 0, -self.m*self.xg, 0, self.Iy, 0],
+            [-self.m*self.yg, self.m*self.xg, 0, 0, 0, self.Iz]
+        ])
+
+        # Added self.mass self.matrix (Ma)
+        self.Ma = -np.diag([self.X_ud, self.Y_vd, self.Z_wd, self.K_pd, self.M_qd, self.N_rd])
+
+        # Total self.mass self.matrix (M)
+        self.M = self.Mrb + self.Ma
+        # Numerical stability (self.epsilon)
+        self.epsilon = 1e-4
+        self.M = self.M + self.epsilon * np.eye(6)
+        
+        # Inverse self.mass self.matrix
+        self.M_INV = np.linalg.inv(self.M)
+
+        # Linear Damping self.matrix (self.D_LIN)
+        self.D_LIN = -np.diag([self.X_u, self.Y_v, self.Z_w, self.K_p, self.M_q, self.N_r])
+        
+        # Quadratic Damping self.matrix (D_quad)
+        self.D_QUAD_COEFFS = np.array([-self.X_uu, -self.Y_vv, -self.Z_ww, -self.K_pp, - self.M_qq, -self.N_rr])
+
+        # Thruster Allocation self.matrix - 6x8
+        self.TAM = np.array([
+            [ 0.707,  0.707, -0.707, -0.707,  0.0,    0.0,    0.0,    0.0   ],
+            [-0.707,  0.707, -0.707,  0.707,  0.0,    0.0,    0.0,    0.0   ],
+            [ 0.0,    0.0,    0.0,    0.0,   -1.0,    1.0,    1.0,   -1.0   ],
+            [ 0.06,  -0.06,   0.06,  -0.06,  -0.218, -0.218,  0.218,  0.218 ],
+            [ 0.06,   0.06,  -0.06,  -0.06,   0.120, -0.120,  0.120, -0.120 ],
+            [-0.1888, 0.1888, 0.1888, -0.1888, 0.0,   0.0,    0.0,    0.0   ]
+        ])
+
+
+        self.THRUST_MIN = -30.0
+        self.THRUST_MAX = 30.0
+        self.DELTA_THRUST_LIMIT = self.THRUST_MAX * self.T_s * 2
+        
+        # Tuning Weights
+        # self.pos_coef = 5 #chill
+        self.pos_coef = 10
+        self.z_coef = self.pos_coef * 3
+        self.angle_coef = 5
+        self.pitch_coef = 40
+        self.psi_coef = 25
+        self.Q_POS = [self.pos_coef, self.pos_coef, self.z_coef, self.angle_coef, self.pitch_coef, self.psi_coef] 
+        
+        
+        self.vel_coef = 10
+        self.angV_coef = 2
+        self.Q_VEL = [self.vel_coef, self.vel_coef, self.vel_coef, self.angV_coef, self.angV_coef, self.angV_coef]
+        
+        # Control Effort to self.minimize thruster usage: if too low it goes crazy and rotates
+        self.R_THRUST = 0.005
+        self.Q_diag = self.Q_POS + self.Q_VEL
+        self.Q = cas.diag(self.Q_diag)
+
+        #   Weights at time = N
+        # pos_n = 150  #chill
+        self.pos_N = 150.0
+        self.angle_N = 150.0
+        self.Q_POS_N = [self.pos_N, self.pos_N, self.pos_N*1.5, self.angle_N, self.angle_N, self.angle_N] 
+
+        # vel_N = 10  #chill
+        self.vel_N = 20
+        self.angV_N = 10
+        self.Q_VEL_N = [self.vel_N, self.vel_N, self.vel_N, self.angV_N, self.angV_N, self.angV_N]
+        self.Q_diag_N = self.Q_POS_N + self.Q_VEL_N
+        self.Q_N = cas.diag(self.Q_diag_N)
+
+        # For constraints:
+        self.z_min = -100
+        self.z_max = 0.5
+
+        # --- TUNING KALMAN FILTER (AEKFD) ---       
+        # Tuning Matrices (Covariances)
+        # Q: Process Noise (Trust in physics model)
+        #    High Q = Physics is uncertain, rely more on sensors
+        #    Low Q = Physics is perfect, ignore noisy sensors
+        q_pos = [0.5, 0.5, 0.1]
+        q_att = [0.5, 0.5, 0.5]
+        q_vel = [0.1, 0.1, 0.1]
+        q_rates = [0.1, 0.1, 1]
+        
+        q_pos = [0.5, 0.5, 0.01]
+        q_att = [0.8, 0.5, 0.5]
+        q_vel = [1.0, 1.0, 0.1]
+        q_rates = [0.1, 0.1, 1]
+
+        q_dist = [0.01,0.01,0.01,0.0001,0.0001,0.0001]  # Disturbance states
+        # q_dist = [0]*6
+        q_diag = q_pos + q_att + q_vel + q_rates + q_dist
+        self.AEKFD_Q = np.diag(q_diag)
+
+        # R: Measurement Noise (Trust in sensors)
+        #    High R = Sensors are noisy, rely on physics
+        #    Low R = Sensors are precise
+        #    Assuming measurement is full state [x,y,z, phi,theta,psi, u,v,w, p,q,r]
+        #    Realistically, GPS noise is ~1.0m, IMU is ~0.01 rad
+        r_pos = [0.1]*3
+        r_att = [0.01]*3
+        r_vel = [0.01, 0.01, 0.01]
+        r_rates = [0.01]*3
+        r_diag = r_pos + r_att + r_vel + r_rates
+        self.AEKFD_R = np.diag(r_diag)
+
+        self.noise_ekf = np.random.normal(0, [0.10, 0.10, 0.05, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
+
+# -------------------------------------------
+# --#####------#####---#------#--------------
+# --#----##---#-----#--#------#--------------
+# --#-----##--#-----#--#------#--------------
+# --#----##---#-----#--#------#--------------
+# --#####-----#-----#--#------#--------------
+# --#----##---#-----#--#------#--------------
+# --#-----##--#-----#---#----#---------------
+# --#-----##--#-----#----#--#----------------
+# --#-----##---#####-------#-----------------
+
+class GazeboROV_Params(NMPC_params):
+    def __init__(self):
+        super().__init__()
+        self.m = 13.5                       # self.mass [kg]
+        self.g = 9.81                       # gravity [m/s^2]
+        self.W = self.m * self.g            # weight [N]
+
+        density = 1000                      # kg/m^3
+        volume = 0.0134                     #m^3
+        self.B = volume * density   * self.g        # buoyancy [N]
+        # For gazebo data (It would be easy to get data for real world ROV aswell, at least for the mass as it is sufficient to weight it and there would be low error)
+
+        self.fov_h = 90
+        self.fov_v = 80
+        
+        # Center of Gravity (CG) and Buoyancy (CB)
+        # CG relative to CO
+        self.r_g = np.array([0.0, 0.0, -0.02]) 
+        self.xg, self.yg, self.zg = self.r_g[0], self.r_g[1], self.r_g[2]
+        
+        # CB relative to CO
+        self.r_b = np.array([0.0, 0.0, 0.1])
+        self.xb, self.yb, self.zb = self.r_b[0], self.r_b[1], self.r_b[2]
+
+        # self.moments of Inertia
+        self.Ix = 0.26
+        self.Iy = 0.23
+        self.Iz = 0.37
+
+        # Added self.mass (Diagonal terms)
+        self.X_ud = -6
+        self.Y_vd = -10
+        self.Z_wd = -10
+        self.K_pd = -0.1
+        self.M_qd = -0.1
+        self.N_rd = -0.1
+
+        # self.X_ud = 0.0
+        # self.Y_vd = 0.0
+        # self.Z_wd = 0.0
+        # self.K_pd = 0.0
+        # self.M_qd = 0.0
+        # self.N_rd = 0.0
+        # also get C_np and get_C in model
 
         # Linear Damping
         self.X_u = -4.03
@@ -101,56 +277,55 @@ class BlueROV_Params(NMPC_params):
 
         # Thruster Allocation self.matrix - 6x8
         # self.TAM = np.array([
-        #     [ 0.707,  0.707, -0.707, -0.707,  0.0,    0.0,    0.0,    0.0   ],
-        #     [-0.707,  0.707, -0.707,  0.707,  0.0,    0.0,    0.0,    0.0   ],
-        #     [ 0.0,    0.0,    0.0,    0.0,   -1.0,    1.0,    1.0,   -1.0   ],
-        #     [ 0.06,  -0.06,   0.06,  -0.06,  -0.218, -0.218,  0.218,  0.218 ],
-        #     [ 0.06,   0.06,  -0.06,  -0.06,   0.120, -0.120,  0.120, -0.120 ],
-        #     [-0.1888, 0.1888, 0.1888, -0.1888, 0.0,   0.0,    0.0,    0.0   ]
+        #     [-1*0.707, -1*0.707,  +1*0.707,  +1*0.707,  0.0,    0.0,    0.0,    0.0   ],
+        #     [ -1*0.707, +1*0.707, -1*0.707,  +1*0.707,  0.0,    0.0,    0.0,    0.0   ],
+        #     [ 0.0,    0.0,    0.0,    0.0,              -1.0,   -1.0,   -1.0,    -1.0   ],
+        #     [ -1*0.00,   +1*0.00,  -1*0.00,  +1*0.00,  0.218, -0.218,  0.218,  -0.218 ],
+        #     [ +1*0.00,  +1*0.00,   -1*0.00,  -1*0.00,   0.120, 0.120, -0.120,  -0.120 ],
+        #     [ -1*0.1888,-1*0.1888, +1*0.1888, +1*0.1888, 0.0,   0.0,    0.0,    0.0   ]
         # ])
-
         self.TAM = np.array([
-            [-1*0.707, -1*0.707,  +1*0.707,  +1*0.707,  0.0,    0.0,    0.0,    0.0   ],
-            [ -1*0.707, +1*0.707, -1*0.707,  +1*0.707,  0.0,    0.0,    0.0,    0.0   ],
-            [ 0.0,    0.0,    0.0,    0.0,              -1.0,   -1.0,   -1.0,    -1.0   ],
-            [ -1*0.00,   +1*0.00,  -1*0.00,  +1*0.00,  0.218, -0.218,  0.218,  -0.218 ],
-            [ +1*0.00,  +1*0.00,   -1*0.00,  -1*0.00,   0.120, 0.120, -0.120,  -0.120 ],
-            [ -1*0.1888,-1*0.1888, +1*0.1888, +1*0.1888, 0.0,   0.0,    0.0,    0.0   ]
+            [ -0.707, -0.707,  0.707,  0.707,  0.000,  0.000,  0.000,  0.000],
+            [-0.707,  0.707, -0.707,  0.707,  0.000,  0.000,  0.000,  0.000],
+            [ 0.000,  0.000,  0.000,  0.000,  -1.000,  -1.000,  -1.000,  -1.000],
+            [ 0.000,  0.000,  0.000,  0.000,  0.215, -0.215,  0.215, -0.215],
+            [ 0.000,  0.000,  0.000,  0.000,  0.118,  0.118, -0.118, -0.118],
+            [ -0.160, 0.160,  0.160, -0.160,  0.000,  0.000,  0.000,  0.000]  
         ])
+
 
         self.THRUST_MIN = -30.0
         self.THRUST_MAX = 30.0
         self.DELTA_THRUST_LIMIT = self.THRUST_MAX * self.T_s * 2
         
         # Tuning Weights
-        # Position Errors [x, y, z, phi, theta, psi]
         # self.pos_coef = 5 #chill
-        self.pos_coef = 15
+        self.pos_coef = 10
         self.z_coef = self.pos_coef * 3
-        self.angle_coef = 1
+        self.angle_coef = 5
         self.pitch_coef = 40
-        self.psi_coef = 30
+        self.psi_coef = 25
         self.Q_POS = [self.pos_coef, self.pos_coef, self.z_coef, self.angle_coef, self.pitch_coef, self.psi_coef] 
         
-        # Velocity Errors [u, v, w, p, q, r]
-        self.vel_coef =10
-        self.angV_coef = 1
+        
+        self.vel_coef = 10
+        self.angV_coef = 2
         self.Q_VEL = [self.vel_coef, self.vel_coef, self.vel_coef, self.angV_coef, self.angV_coef, self.angV_coef]
         
         # Control Effort to self.minimize thruster usage: if too low it goes crazy and rotates
-        self.R_THRUST = 0.01
+        self.R_THRUST = 0.005
         self.Q_diag = self.Q_POS + self.Q_VEL
         self.Q = cas.diag(self.Q_diag)
 
         #   Weights at time = N
         # pos_n = 150  #chill
-        self.pos_N = 180.0
-        self.angle_N = 80.0
+        self.pos_N = 400.0
+        self.angle_N = 150.0
         self.Q_POS_N = [self.pos_N, self.pos_N, self.pos_N*1.5, self.angle_N, self.angle_N, self.angle_N] 
 
         # vel_N = 10  #chill
-        self.vel_N = 15
-        self.angV_N = 1.0
+        self.vel_N = 20
+        self.angV_N = 10
         self.Q_VEL_N = [self.vel_N, self.vel_N, self.vel_N, self.angV_N, self.angV_N, self.angV_N]
         self.Q_diag_N = self.Q_POS_N + self.Q_VEL_N
         self.Q_N = cas.diag(self.Q_diag_N)
@@ -164,13 +339,18 @@ class BlueROV_Params(NMPC_params):
         # Q: Process Noise (Trust in physics model)
         #    High Q = Physics is uncertain, rely more on sensors
         #    Low Q = Physics is perfect, ignore noisy sensors
+        q_pos = [0.5, 0.5, 0.1]
+        q_att = [0.5, 0.5, 0.5]
+        q_vel = [0.1, 0.1, 0.1]
+        q_rates = [0.1, 0.1, 1]
+        
         q_pos = [0.5, 0.5, 0.01]
         q_att = [0.8, 0.5, 0.5]
         q_vel = [1.0, 1.0, 0.1]
-        q_rates = [0.05, 0.05, 0.1]
+        q_rates = [0.1, 0.1, 1]
 
-        q_dist = [0.01,0.01,0.01,0.001,0.001,0.001]  # Disturbance states
-        #q_dist = [0]*6
+        q_dist = [1.0, 1.0, 0.5, 5.0, 5.0, 7.0]  # Disturbance states
+        # q_dist = [0]*6
         q_diag = q_pos + q_att + q_vel + q_rates + q_dist
         self.AEKFD_Q = np.diag(q_diag)
 
@@ -187,17 +367,6 @@ class BlueROV_Params(NMPC_params):
         self.AEKFD_R = np.diag(r_diag)
 
         self.noise_ekf = np.random.normal(0, [0.10, 0.10, 0.05, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
-
-# -------------------------------------------
-# --#####------#####---#------#--------------
-# --#----##---#-----#--#------#--------------
-# --#-----##--#-----#--#------#--------------
-# --#----##---#-----#--#------#--------------
-# --#####-----#-----#--#------#--------------
-# --#----##---#-----#--#------#--------------
-# --#-----##--#-----#---#----#---------------
-# --#-----##--#-----#----#--#----------------
-# --#-----##---#####-------#-----------------
 
 # i had fun making these so i can scroll this i see this :) i dont think that's good coding habit but idc d(^_^)b
 

@@ -2,7 +2,7 @@ from acados_template import AcadosOcp, AcadosOcpSolver
 
 from .model import export_vehicle_model
 
-#from model import export_vehicle_model
+# from model import export_vehicle_model
 
 import numpy as np
 import scipy.linalg
@@ -11,14 +11,12 @@ import scipy.linalg
 class Acados_Solver_Wrapper:
     def __init__(self, vehicle_params):
         self.params = vehicle_params
-
-        # Load Model
         self.model = export_vehicle_model(self.params)
 
         self.ocp = AcadosOcp()
         self.ocp.model = self.model
 
-        # Dimensions
+
         nx = self.params.nx
         nu = self.params.nu  # 8 for BlueROV2, 2 for BlueBoat
         ny = nx + nu 
@@ -26,7 +24,7 @@ class Acados_Solver_Wrapper:
 
         self.ocp.parameter_values = np.zeros(6)  # Disturbance parameter (i forgot before ops)
 
-        # Cost Setup (Linear Least Squares)
+        # Cost Setup : Linear Least Squares
         self.ocp.cost.cost_type = 'LINEAR_LS'
         self.ocp.cost.cost_type_e = 'LINEAR_LS'
 
@@ -114,11 +112,10 @@ class Acados_Solver_Wrapper:
             self.solver.set(0, "lbx", x0)
             self.solver.set(0, "ubx", x0)
 
-            # If you have a trajectory of disturbances, you could iterate this too.
             for i in range(self.params.N):
                 self.solver.set(i, "p", disturbance)
 
-            # CASE A: Single Point Reference (Old behavior)
+            # If: single point reference
             if target_ref.ndim == 1:
                 y_ref = np.concatenate((target_ref, np.zeros(self.params.nu)))
                 # Set for 0 to N-1
@@ -127,7 +124,7 @@ class Acados_Solver_Wrapper:
                 # Set for N (Terminal, no controls)
                 self.solver.set(self.params.N, "yref", target_ref)
 
-            # CASE B: Trajectory Reference (New behavior)
+            # If: Trajectory Reference (New behavior)
             else:                
                 for i in range(self.params.N):
                     # Stick to last point if trajectory is too short

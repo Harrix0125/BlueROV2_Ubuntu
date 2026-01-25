@@ -1,5 +1,8 @@
 import numpy as np
-from nmpc_params import BlueROV_Params as MPCC
+# from nmpc_params import BlueROV_Params as MPCC
+
+from .nmpc_params import GazeboROV_Params as MPCC
+
 class VisualTarget:
     def __init__(self, start_state, fov_h = 90, fov_v = 80, max_dist = 10):
         self.true_state = np.array(start_state[0:6])
@@ -72,7 +75,7 @@ class VisualTarget:
             self.last_seen_t = 0
             
         else:
-            measurement = self.kf.get_state()[0:3]  # No new measurement, use prediction
+            measurement = self.kf.get_state()[0:3]
             self.kf.update(measurement)
             self.last_seen_t += dt
         
@@ -99,19 +102,17 @@ class TargetTrackerKF:
         self.n_states = 6  # [x, y, z, vx, vy, vz]
         self.n_meas = 3  # [x, y, z]
 
-        # State Vector
+
         self.x_est = np.zeros(self.n_states)
+        self.P_est = np.eye(self.n_states)
 
-        # Covariance Matrix
-        self.P_est = np.eye(self.n_states) * 1.0  # Initial 
 
-        # State Transition Matrix
         self.F = np.eye(self.n_states)
         self.F[0,3] = dt_default
         self.F[1,4] = dt_default
         self.F[2,5] = dt_default
 
-        # Measurement Matrix
+
         self.H = np.zeros((self.n_meas, self.n_states))
         self.H[0,0] = 1
         self.H[1,1] = 1
@@ -149,17 +150,17 @@ class TargetTrackerKF:
         # Residual
         y = z - (self.H @ self.x_est)
 
-        # Uncertainty
+        # Uncertainty = HPH^T + R
         S = self.H @ self.P_est @ self.H.T + self.R
 
-        # Kalman Gain
+        # Kalman Gain = P H^T S^-1
         try:
             K = self.P_est @ self.H.T @ np.linalg.inv(S)
         except np.linalg.LinAlgError:
             print("Singular matrix in Kalman Gain calculation.")
             K = np.zeros((self.n_states, self.n_meas))
 
-        # Update State and Covariance
+        # Update both of them 
         self.x_est = self.x_est + K @ y 
         self.P_est = (self.I - K @ self.H) @ self.P_est
 

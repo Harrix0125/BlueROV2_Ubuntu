@@ -1,58 +1,12 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-
-def plot_double_target_3d(traj_x, traj_y, traj_z, state_target_1, state_target_2,thrust_history, dt):
-    fig = plt.figure(figsize=(15, 7))
-    # --- Trajectory Plot ---
-    ax1 = fig.add_subplot(121, projection='3d')
-    ax1.plot(traj_x, traj_y, traj_z, label='Path', linewidth=2)
-    
-    # Add Start and End markers to see the full context
-    ax1.scatter(traj_x[0], traj_y[0], traj_z[0], c='g', marker='o', s=50, label='Start')
-    ax1.scatter(state_target_1[0], state_target_1[1], state_target_1[2], c='b', marker='x', s=50, label='Target')
-    ax1.scatter(state_target_2[0], state_target_2[1], state_target_2[2], c='r', marker='x', s=50, label='Target 2')
-    
-    ax1.set_title('3D Path (NED Frame)')
-    ax1.set_xlabel('X [m]')
-    ax1.set_ylabel('Y [m]')
-    ax1.set_zlabel('Z [m]')
-    ax1.invert_zaxis() # standard for underwater vehicles (Depth is positive)
-    
-    # 2. FIX 3D ASPECT RATIO (Crucial for realism)
-    # This forces the 3D box to have equal visual dimensions
-    xyz_limits = np.array([ax1.get_xlim(), ax1.get_ylim(), ax1.get_zlim()])
-    xyz_range = np.ptp(xyz_limits, axis=1)
-    ax1.set_box_aspect(xyz_range) 
-    
-    ax1.legend()
-    
-    # --- Thruster Plot ---
-    ax2 = fig.add_subplot(122)
-    time_axis = np.arange(thrust_history.shape[0]) * dt
-    
-    for t in range(thrust_history.shape[1]):
-        ax2.plot(time_axis, thrust_history[:, t], label=f'T{t+1}')
-        
-    ax2.set_title('Thruster Forces')
-    ax2.set_xlabel('Time (s)')
-    ax2.set_ylabel('Force (N)')
-    ax2.grid(True, linestyle='--', alpha=0.7)
-    
-    # 3. MOVE LEGEND OUTSIDE
-    # This places the legend outside the box so it doesn't cover the data
-    ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
-    
-    # Adjust layout to make room for the external legend
-    plt.tight_layout()
-    plt.show()
-
 def plot_TT_3d(target_x, target_y, target_z,
                ref_x, ref_y, ref_z, 
                rov_x, rov_y, rov_z, 
-               rov_roll, rov_pitch, rov_yaw,  # <--- NEW INPUTS (Radians)
+               rov_roll, rov_pitch, rov_yaw,
                thrust_history, dt, 
-               arrow_stride=20, arrow_length=1.5): # <--- NEW VISUAL SETTINGS
+               arrow_stride=20, arrow_length=1.5): 
     """
     ref_x, ref_y, ref_z: 1D arrays of the Target/Reference path
     rov_x, ... rov_yaw: 1D arrays of Actual ROV state (Angles in Radians!)

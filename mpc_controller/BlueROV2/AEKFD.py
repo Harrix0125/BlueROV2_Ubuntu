@@ -26,7 +26,12 @@ class AEKFD():
         
         # Initial State & Covariance
         self.x_est = np.zeros(self.n_states)
-        self.P_est = np.eye(self.n_states)*1
+        self.P_est = np.eye(self.n_states)
+
+
+        self.beta_max = 50.0
+        self.gamma = 1.0
+        self.nis_threshold = 9.0
 
         self._setup_augmented_model(acados_model)
 
@@ -112,24 +117,22 @@ class AEKFD():
         S_k = H @ self.P_est @ H.T + self.R
         
         #   VFF adaptive law
+        nis = self.check_outlier(y_k, S_k)
         beta = 1.0
-        gamma = 1.0
-        nis_threshold = 12.0
-        # nis = self.check_outlier(y_k, S_k)
         # # We pass y_k (already wrapped) and S_k (includes R)
-        # if (nis > 26.2): # Threshold for ~12 DOF
+        if (nis > 48.0): # Threshold for ~12 DOF 26.2
         #     # REJECT: Return the predicted state as-is
-        #     print("Outlier rejected")
-        #     return self.x_est
-        # elif (nis > nis_threshold):
-        #     print("NIS greater than trheshold", nis)
-        #     beta = 1 + gamma*(nis - nis_threshold)
-        #     beta = min(beta,100)
+            print("Outlier rejected, NIS: ", nis)
+            return self.x_est
+        elif (nis > (self.nis_threshold+50)):
+            print("NIS greater than trheshold", nis)
+            beta = 1.0 + self.gamma*(nis - self.nis_threshold)
+            beta = min(beta,self.beta_max)          # should not need this anyway
 
-        #     # Re-calculate self.P_est
-        #     self.P_est =self.P_est*beta
-        #     # Re-calculate S_k
-        #     S_k = H @ self.P_est @ H.T + self.R
+            # Re-calculate self.P_est
+            self.P_est =self.P_est*beta
+            # Re-calculate S_k
+            S_k = H @ self.P_est @ H.T + self.R
 
         # Calculate Kalman Gain
         K_k = self.P_est @ H.T @ np.linalg.inv(S_k)

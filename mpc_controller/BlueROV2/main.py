@@ -1,16 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-from mpl_toolkits.mplot3d import Axes3D
 from AEKFD import AEKFD as EKF
 from target_estimator import VisualTarget
-import casadi as cas
 
 from nmpc_solver_acados import Acados_Solver_Wrapper
 from nmpc_params import BlueROV_Params, BlueBoat_Params
 from model import export_vehicle_model
 from utils import Vehicle_Utils
-from plotters import LOS_plot_dynamics, plot_double_target_3d, plot_TT_3d, LOS_plot_camera_fov
+from plotters import LOS_plot_dynamics, plot_TT_3d, LOS_plot_camera_fov
 def simulation():
     vehicle_type = "ROV"
     state_now = np.zeros(12)
@@ -23,14 +21,13 @@ def simulation():
         my_params = BlueBoat_Params()
     sim = Vehicle_Utils(my_params)
 
-    # This will trigger code generation and compilation (takes time once)
     print("Compiling Acados Solver...")
     solver = Acados_Solver_Wrapper(my_params)
     print("Compilation Complete.")
 
 
 
-    # Storage
+    # I'll clean this up i swear
     traj_x, traj_y, traj_z = [], [], []
     traj_phi, traj_theta, traj_psi = [], [], []
 
@@ -53,12 +50,14 @@ def simulation():
     state_moving = sim.generate_target_trajectory(steps_tot, my_params.T_s, speed=0.9)
     t0 = time.time()
 
+
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
     round = 4
-    if round == 3:
+    if round == 3:      # Straight line
         state_moving = sim.get_linear_traj(steps_tot, my_params.T_s, speed=0.9)
-    elif round == 4:
+    elif round == 4:    # Mad fella trajectory
         state_moving = sim.generate_target_trajectory(steps_tot, my_params.T_s, speed=0.9)
+
 
     #EKF Setup
     acados_model = export_vehicle_model(my_params)
@@ -69,6 +68,7 @@ def simulation():
     state_est = np.zeros(12)
     state_est[0:12] = np.copy(state_now)
 
+    # Too many flags
     testing_EKF = True
     is_there_noise = True
     noise_ekf = my_params.noise_ekf if is_there_noise else np.array([0.0]*12)    
@@ -93,26 +93,23 @@ def simulation():
 
             is_visible = camera_data.check_visibility(state_est[0:12], seen_it_once)
             if is_visible:
+                # If visible modify the seen flag, estimate target position and get the trajectory
                 seen_it_once = True
-
-                # Update target estimate from camera and get state
                 est_target = camera_data.get_camera_estimate(state_est[0:12], dt = my_params.T_s, camera_noise = camera_noise)
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
 
-                # Get guidance reference
                 #ref_guidance = sim.get_shadow_traj(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
-
                 ref_guidance = sim.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+
             elif not is_visible and seen_it_once:
 
-                # Visible before but not now: use last seen position
+                # Visible before but not now: use last seen position and et imaginary reference based on last seen position
                 est_target = camera_data.get_camera_estimate(state_est[0:12], dt = my_params.T_s, camera_noise = camera_noise)
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
-
-                # Get imaginary reference based on last seen position
                 ref_guidance = sim.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.0)
+                
                 if camera_data.last_seen_t > 5.0:
                     # If not seen for more than 5 seconds, just stay still
                     ref_guidance = state_est[0:12]
@@ -124,11 +121,13 @@ def simulation():
                 # Not visible and never seen: stay still till i see something
                 ref_guidance = wait_here[0:12]
 
-            # Solve NMPC
             u_optimal = solver.solve(state_est, ref_guidance,  disturbance=estimated_disturbance)
             u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
             u_previous = u_optimal
-            # Plant Step [Imagine this as GPS]
+
+            print("u_optimal: ", u_optimal)
+
+            # Plant Step [Imagine this as GPS data cause we dont have GPS data AND RK4might be a little different from drone state estimation so there is error (good i guess otherwise we are just simulating in same perfect hysics)]
             if is_there_disturbance == False:
                 real_disturbance[0:6] = np.zeros(6)
             elif i > 200:
@@ -139,15 +138,13 @@ def simulation():
             
 
             if testing_EKF:
-                # EKF:
                 if is_there_noise:
                     noise_ekf = my_params.noise_ekf
                 else:
                     noise_ekf = np.random.normal(0, [0.0]*12)
                 measured_state = state_now[0:12] + noise_ekf
-                # Updates EKF P and state estimate
+
                 ekf.predict(u_optimal)
-                # Gets new state estimate with K gain
                 ekf.measurement_update(measured_state)
                 state_est = ekf.get_state_estimate()
                 estimated_disturbance = ekf.get_disturbance_estimate()
@@ -156,7 +153,7 @@ def simulation():
             
 
 
-            # Keep track of data for plotting
+            # Keep track of data for plotting... i'll have to clean this
             traj_x.append(state_now[0])
             traj_y.append(state_now[1])
             traj_z.append(state_now[2])
@@ -183,14 +180,14 @@ def simulation():
 
             camera_noise = np.random.normal(0, 0.006, 3)
 
-
+    # Straight line trajectory
     elif round == 3:
         for i in range(steps_tot): 
-            # Solve
+            
             u_optimal = solver.solve(state_now, state_moving[i,:])
             u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
             u_previous = u_optimal
-            # Plant Step
+            
             state_now = sim.robot_plant_step(state_now, u_optimal, my_params.T_s, real_disturbance)
 
             traj_x.append(state_now[0])

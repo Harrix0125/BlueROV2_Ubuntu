@@ -24,6 +24,7 @@ def export_vehicle_model(params):
     W = params.W
     B = params.B
     zg = params.zg
+    zb = params.zb
 
     # quadr damping
     dq_diag = cas.vertcat(
@@ -43,8 +44,8 @@ def export_vehicle_model(params):
         -diff * cas.sin(theta),
         diff * cas.cos(theta) * cas.sin(phi),
         diff * cas.cos(theta) * cas.cos(phi),
-        zg * W * cas.cos(theta) * cas.sin(phi),
-        zg * W * cas.sin(theta),
+        -(zg * W - zb * B) * cas.cos(theta) * cas.sin(phi),
+        -(zg * W - zb * B)* cas.sin(theta),
         0
     )
 
@@ -52,10 +53,10 @@ def export_vehicle_model(params):
     tau = cas.mtimes(TAM, u_ctrl)
     D_total = D_lin + D_quad
     
-    #coriolis_matrix = get_C_SX(nu, params) (not in Gazebo?)
+    coriolis_matrix = get_C_SX(nu, params) #(not in Gazebo?)
 
-    # Forces sum : tau - cas.mtimes((D_total + coriolis_matrix), nu) - g_vec+ p_dist
-    forces_sum = tau - cas.mtimes((D_total ), nu) - g_vec + p_dist
+    forces_sum = tau - cas.mtimes((D_total - coriolis_matrix), nu) - g_vec + p_dist
+    # forces_sum = tau - cas.mtimes((D_total ), nu) - g_vec + p_dist
     nu_dot = cas.mtimes(M_inv, forces_sum)
 
     J1 = get_J1(phi, theta, psi) # Ensure utils returns SX compatible logic
@@ -110,30 +111,23 @@ def get_C_SX(nu, params):
     Computes Coriolis matrix using CasADi SX and params.
     """
     C_rb = cas.SX.zeros(6, 6)
-    
     m = params.m
     Ix, Iy, Iz = params.Ix, params.Iy, params.Iz
-    
     u, v, w = nu[0], nu[1], nu[2]
     p, q, r = nu[3], nu[4], nu[5]
-
-    # Rigid Body Coriolis
-    # Rows 0-2 (Linear Momentum)
+    # Rows 0-2 are linear 
     C_rb[0, 4] =  m * w;   C_rb[0, 5] = -m * v
     C_rb[1, 3] = -m * w;   C_rb[1, 5] =  m * u
     C_rb[2, 3] =  m * v;   C_rb[2, 4] = -m * u
-    # Rows 3-5 (Angular Momentum)
+    # Rows 3-5 are angular 
     C_rb[3, 1] = -m * w;   C_rb[3, 2] =  m * v;   C_rb[3, 4] =  Iz * r;   C_rb[3, 5] = -Iy * q
     C_rb[4, 0] =  m * w;   C_rb[4, 2] = -m * u;   C_rb[4, 3] = -Iz * r;   C_rb[4, 5] =  Ix * p
     C_rb[5, 0] = -m * v;   C_rb[5, 1] =  m * u;   C_rb[5, 3] =  Iy * q;   C_rb[5, 4] = -Ix * p
     
-    # Added Mass Coriolis (Approximated Diagonal)
-    C_a = cas.SX.zeros(6, 6)
     
+    C_a = cas.SX.zeros(6, 6)
     Xud, Yvd, Zwd = params.X_ud, params.Y_vd, params.Z_wd
     Kpd, Mqd, Nrd = params.K_pd, params.M_qd, params.N_rd
-
-    # Precompute terms
     a1, a2, a3 = Xud*u, Yvd*v, Zwd*w
     b1, b2, b3 = Kpd*p, Mqd*q, Nrd*r
 
@@ -145,4 +139,4 @@ def get_C_SX(nu, params):
     C_a[4, 5] = -b1;   C_a[4, 3] = -b3;  C_a[4, 2] =  a1;  C_a[4, 0] = -a3
     C_a[5, 4] =  b1;   C_a[5, 3] =  b2;  C_a[5, 1] = -a1;  C_a[5, 0] =  a2
 
-    return  C_rb + C_a
+    return   C_a + C_rb
