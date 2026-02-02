@@ -299,33 +299,32 @@ class GazeboROV_Params(NMPC_params):
         self.DELTA_THRUST_LIMIT = self.THRUST_MAX * self.T_s * 2
         
         # Tuning Weights
-        # self.pos_coef = 5 #chill
-        self.pos_coef = 10
-        self.z_coef = self.pos_coef * 3
-        self.angle_coef = 5
-        self.pitch_coef = 40
-        self.psi_coef = 25
+        # self.pos_coef = 5 #chill                         -0.1
+        self.pos_coef = 30      #                       20 > 40 > 30
+        self.z_coef = 45        # 60 to 50 = -0.2m              > 45
+        self.angle_coef = 12
+        self.pitch_coef = 80    # 40 to 70 = -0.2m      70 > 90 > 80
+        self.psi_coef = 30
         self.Q_POS = [self.pos_coef, self.pos_coef, self.z_coef, self.angle_coef, self.pitch_coef, self.psi_coef] 
-        
-        
-        self.vel_coef = 10
+
+        self.vel_coef = 20
         self.angV_coef = 2
         self.Q_VEL = [self.vel_coef, self.vel_coef, self.vel_coef, self.angV_coef, self.angV_coef, self.angV_coef]
         
         # Control Effort to self.minimize thruster usage: if too low it goes crazy and rotates
-        self.R_THRUST = 0.005
+        self.R_THRUST = 0.0008
         self.Q_diag = self.Q_POS + self.Q_VEL
         self.Q = cas.diag(self.Q_diag)
 
         #   Weights at time = N
         # pos_n = 150  #chill
-        self.pos_N = 400.0
+        self.pos_N = 350.0
         self.angle_N = 150.0
         self.Q_POS_N = [self.pos_N, self.pos_N, self.pos_N*1.5, self.angle_N, self.angle_N, self.angle_N] 
 
         # vel_N = 10  #chill
-        self.vel_N = 20
-        self.angV_N = 10
+        self.vel_N = 40
+        self.angV_N = 20
         self.Q_VEL_N = [self.vel_N, self.vel_N, self.vel_N, self.angV_N, self.angV_N, self.angV_N]
         self.Q_diag_N = self.Q_POS_N + self.Q_VEL_N
         self.Q_N = cas.diag(self.Q_diag_N)
@@ -349,7 +348,7 @@ class GazeboROV_Params(NMPC_params):
         q_vel = [1.0, 1.0, 0.1]
         q_rates = [0.1, 0.1, 1]
 
-        q_dist = [1.0, 1.0, 0.5, 5.0, 5.0, 7.0]  # Disturbance states
+        q_dist = [1.0, 1.0, 0.5, 0.5, 0.5, 1.0]  # Disturbance states
         # q_dist = [0]*6
         q_diag = q_pos + q_att + q_vel + q_rates + q_dist
         self.AEKFD_Q = np.diag(q_diag)

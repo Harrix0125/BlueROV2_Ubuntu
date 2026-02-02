@@ -478,9 +478,16 @@ class Vehicle_Utils:
             # Handle case where target might be transposed compared to estimate
             if est.shape == tgt.T.shape:
                 tgt = tgt.T
+            elif est.shape == tgt.shape:
+                tgt = tgt
             else:
+                min_len = min(est.shape[1], tgt.shape[1])
+                min_len = min(min_len, ref.shape[1])
+                est = est[:, :min_len]
+                tgt = tgt[:, :min_len]
+                print(f"Synchronized to length: {min_len}")
                 print(f"Shape mismatch! Est: {est.shape}, Tgt: {tgt.shape}")
-                return
+                ref = ref[:,:min_len]
 
         # 2. Calculate Errors for TARGET
         # Difference at every step

@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.widgets import Slider
 
 def plot_TT_3d(target_x, target_y, target_z,
                ref_x, ref_y, ref_z, 
@@ -269,3 +270,108 @@ def LOS_plot_camera_fov(rov_x, rov_y, rov_z, rov_psi, rov_pitch, target_data, dt
 
     plt.tight_layout()
 
+def LOS_interactive_viewer(rov_x, rov_y, rov_z, target_data, dt):
+    """
+    Creates an interactive plot with a time slider to visualize 
+    ROV and Target positions at specific timestamps.
+    """
+    # --- 1. DATA PREP ---
+    p_rov = np.array([rov_x, rov_y, rov_z]).T
+    p_target = target_data[:len(rov_x), 0:3]
+    time = np.arange(len(rov_x)) * dt
+    max_time = time[-1]
+
+    # --- 2. SETUP FIGURE AND AXES ---
+    # We leave extra space at the bottom for the slider
+    fig = plt.figure(figsize=(12, 8))
+    plt.subplots_adjust(bottom=0.25) # Make room at bottom
+
+    # Subplot 1: Top-Down View (X-Y)
+    ax_xy = fig.add_subplot(1, 2, 1)
+    ax_xy.set_title("Top-Down Trajectory (X-Y)")
+    ax_xy.set_xlabel("X [m]")
+    ax_xy.set_ylabel("Y [m]")
+    ax_xy.axis('equal')
+    ax_xy.grid(True)
+
+    # Subplot 2: Depth View (Time-Z) or Side View
+    # Let's do Side View (X-Z) so it looks like "Space" 
+    # (Or stick to Time-Depth if you prefer)
+    ax_z = fig.add_subplot(1, 2, 2)
+    ax_z.set_title("Depth Profile (Time vs Z)")
+    ax_z.set_xlabel("Time [s]")
+    ax_z.set_ylabel("Depth [m]")
+    ax_z.invert_yaxis() # Surface at top
+    ax_z.grid(True)
+
+    # --- 3. PLOT STATIC BACKGROUND (The full history) ---
+    # These lines won't move. They show the path taken.
+    ax_xy.plot(p_target[:, 0], p_target[:, 1], 'r--', alpha=0.3, label='Target Path')
+    ax_xy.plot(p_rov[:, 0], p_rov[:, 1], 'b-', alpha=0.3, label='ROV Path')
+    
+    ax_z.plot(time, p_target[:, 2], 'r--', alpha=0.3)
+    ax_z.plot(time, p_rov[:, 2], 'b-', alpha=0.3)
+
+    # --- 4. INITIALIZE MOVING POINTS (The "Dots") ---
+    # We start at index 0 (t=0)
+    # comma after variable name extracts the object from the list
+    rov_dot_xy, = ax_xy.plot([], [], 'bo', markersize=10, label='ROV Current')
+    tgt_dot_xy, = ax_xy.plot([], [], 'ro', markersize=10, label='Target Current')
+    
+    rov_dot_z, = ax_z.plot([], [], 'bo', markersize=10)
+    tgt_dot_z, = ax_z.plot([], [], 'ro', markersize=10)
+
+    ax_xy.legend(loc='upper right')
+
+    # --- 5. CREATE THE SLIDER ---
+    # Define the axis area where the slider will live [left, bottom, width, height]
+    ax_slider = plt.axes([0.2, 0.1, 0.6, 0.03])
+    
+    time_slider = Slider(
+        ax=ax_slider,
+        label='Time [s]',
+        valmin=0,
+        valmax=max_time,
+        valinit=0,
+        valstep=dt # Snap to your exact time steps
+    )
+
+    # --- 6. THE UPDATE FUNCTION ---
+    # This runs every time you move the slider
+    def update(val):
+        current_time = time_slider.val
+        # Find the array index closest to the slider time
+        idx = int(current_time / dt)
+        
+        # Ensure we don't go out of bounds
+        if idx >= len(rov_x): 
+            idx = len(rov_x) - 1
+
+        # UPDATE X-Y DOTS
+        rov_dot_xy.set_data([p_rov[idx, 0]], [p_rov[idx, 1]])
+        tgt_dot_xy.set_data([p_target[idx, 0]], [p_target[idx, 1]])
+        
+        # UPDATE DEPTH DOTS (Time vs Depth)
+        # Note: For set_data, we need lists/arrays, hence the brackets []
+        rov_dot_z.set_data([time[idx]], [p_rov[idx, 2]])
+        tgt_dot_z.set_data([time[idx]], [p_target[idx, 2]])
+        
+        # Redraw the canvas
+        fig.canvas.draw_idle()
+
+    # Register the update function with the slider
+    time_slider.on_changed(update)
+    
+    # Run update once to set initial positions
+    update(0)
+
+    # Return the slider object to prevent Garbage Collection
+    return time_slider, fig 
+
+# --- MAIN EXECUTION ---
+
+# IMPORTANT: You must assign the return value to a variable!
+# If you just call the function without 'slider = ...', the slider will freeze.
+# slider_obj, fig_obj = LOS_interactive_viewer(rov_x, rov_y, rov_z, target_data, dt)
+
+# plt.show()

@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
+import matplotlib.pyplot as plt
 
 # ROS Msgs
 from nav_msgs.msg import Odometry
@@ -16,6 +17,8 @@ from .BlueROV2.AEKFD import AEKFD
 from .BlueROV2.model import export_vehicle_model
 from .BlueROV2.target_estimator import VisualTarget
 from .BlueROV2.utils import Vehicle_Utils
+from .BlueROV2.plotters import LOS_interactive_viewer
+
 
 class BlueROVMPC(Node):
     def __init__(self):
@@ -44,7 +47,9 @@ class BlueROVMPC(Node):
         self.steps_tot = 1000
         self.actual_step = 0
         self.sim = Vehicle_Utils(self.my_params)
-        self.state_moving = self.sim.generate_target_trajectory(self.steps_tot, self.my_params.T_s, speed=0.9)
+        # self.state_moving = self.sim.get_linear_traj(self.steps_tot, self.my_params.T_s, speed=0.9)
+        self.state_moving = self.sim.generate_target_trajectory(self.steps_tot, self.my_params.T_s, speed=0.75)
+
         self.camera_data = VisualTarget(start_state=self.state_moving[0,:], fov_h=self.my_params.fov_h, fov_v=self.my_params.fov_v, max_dist=10)
         self.seen_it_once = False
         self.wait_here = np.copy(self.state_now[0:12])
@@ -75,6 +80,12 @@ class BlueROVMPC(Node):
         
         self.get_logger().info("Direct Control Node Started. Waiting for Gazebo...")
 
+        self.history_rov_x = []
+        self.history_rov_y = []
+        self.history_rov_z = []
+        self.history_target = []
+
+
     def odom_callback(self, msg):
         """
         Convert ROS ENU Odometry to NMPC NED State
@@ -104,7 +115,13 @@ class BlueROVMPC(Node):
         r = msg.twist.twist.angular.z
 
         self.state_now = np.array([x, y, z, phi, theta, psi, u, v, w, p, q, r])
-        
+
+        #   For plotting later on
+        self.history_rov_x.append(x)
+        self.history_rov_y.append(y)
+        self.history_rov_z.append(z)
+        self.history_target.append(self.state_moving[self.actual_step, 0:6])
+
         self.ekf.predict(self.u_previous)
 
         self.ekf.measurement_update(self.state_now)
@@ -130,8 +147,8 @@ class BlueROVMPC(Node):
             est_target_pos = est_target[0:3]
             est_target_vel = est_target[3:6]
 
-            #self.ref_target = sim.get_shadow_traj(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
-            self.ref_target = self.sim.get_shadow_ref(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+            self.ref_target = self.sim.get_shadow_traj(x_est[0:12], est_target_pos, est_target_vel, dt = self.my_params.T_s,horizon_N = self.my_params.N+1, desired_dist=2.5)
+            #self.ref_target = self.sim.get_shadow_ref(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
 
         elif not is_visible and self.seen_it_once:
 
@@ -167,7 +184,7 @@ class BlueROVMPC(Node):
         u_gazebo[5] = u_optimal[5] 
         u_gazebo[6] = u_optimal[6]
         u_gazebo[7] = u_optimal[7]
-        # print("u_optimal: ", u_gazebo)
+        print("u_optimal: ", u_gazebo)
 
         for i in range(8):
             msg = Float64()
@@ -234,8 +251,19 @@ def main(args=None):
     finally:
         zero_msg = Float64()
         zero_msg.data = 0.0
-        for pub in node.thruster_pubs:
-            pub.publish(zero_msg)
+        # for pub in node.thruster_pubs:
+        #     pub.publish(zero_msg)
+        rov_x = np.array(node.history_rov_x)
+        rov_y = np.array(node.history_rov_y)
+        rov_z = np.array(node.history_rov_z)
+        target_data = np.array(node.history_target)
+        dt = node.my_params.T_s
+
+        node.sim.get_error_avg_std([rov_x, rov_y, rov_z], node.state_moving[:,:3].T, target_data[:,:3].T)
+
+        if len(rov_x) > 0:
+            slider, fig = LOS_interactive_viewer(rov_x, rov_y, rov_z, target_data, dt)
+            plt.show()
         node.destroy_node()
         rclpy.shutdown()
 
