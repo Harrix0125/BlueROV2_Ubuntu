@@ -1,7 +1,7 @@
 import numpy as np
 # from nmpc_params import BlueROV_Params as MPCC
 
-from .nmpc_params import GazeboROV_Params as MPCC
+from config.nmpc_params import GazeboROV_Params as MPCC
 
 class VisualTarget:
     def __init__(self, start_state, fov_h = 90, fov_v = 80, max_dist = 10):

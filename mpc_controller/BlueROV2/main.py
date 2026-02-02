@@ -1,14 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-from AEKFD import AEKFD as EKF
-from target_estimator import VisualTarget
+from estimators.aekfd import AEKFD as EKF
+from estimators.target_estimator import VisualTarget
 
 from nmpc_solver_acados import Acados_Solver_Wrapper
-from nmpc_params import BlueROV_Params, BlueBoat_Params
-from model import export_vehicle_model
-from utils import Vehicle_Utils
-from plotters import LOS_plot_dynamics, plot_TT_3d, LOS_plot_camera_fov
+from config.nmpc_params import BlueROV_Params, BlueBoat_Params
+from core.model import export_vehicle_model
+from utils.plotters import LOS_plot_dynamics, plot_TT_3d, LOS_plot_camera_fov
+from utils.plant_sim import Vehicle_Sim_Utils as Vehicle_Utils 
+from guidance import get_shadow_ref, get_shadow_traj
 def simulation():
     vehicle_type = "ROV"
     state_now = np.zeros(12)
@@ -99,8 +100,8 @@ def simulation():
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
 
-                #ref_guidance = sim.get_shadow_traj(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
-                ref_guidance = sim.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+                #ref_guidance = get_shadow_traj(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
+                ref_guidance = get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
 
             elif not is_visible and seen_it_once:
 
@@ -108,7 +109,7 @@ def simulation():
                 est_target = camera_data.get_camera_estimate(state_est[0:12], dt = my_params.T_s, camera_noise = camera_noise)
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
-                ref_guidance = sim.get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.0)
+                ref_guidance = get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.0)
                 
                 if camera_data.last_seen_t > 5.0:
                     # If not seen for more than 5 seconds, just stay still

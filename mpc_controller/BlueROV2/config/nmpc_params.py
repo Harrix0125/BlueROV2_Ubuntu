@@ -304,7 +304,7 @@ class GazeboROV_Params(NMPC_params):
         self.z_coef = 45        # 60 to 50 = -0.2m              > 45
         self.angle_coef = 12
         self.pitch_coef = 80    # 40 to 70 = -0.2m      70 > 90 > 80
-        self.psi_coef = 30
+        self.psi_coef = 50
         self.Q_POS = [self.pos_coef, self.pos_coef, self.z_coef, self.angle_coef, self.pitch_coef, self.psi_coef] 
 
         self.vel_coef = 20
@@ -318,7 +318,7 @@ class GazeboROV_Params(NMPC_params):
 
         #   Weights at time = N
         # pos_n = 150  #chill
-        self.pos_N = 350.0
+        self.pos_N = 320.0
         self.angle_N = 150.0
         self.Q_POS_N = [self.pos_N, self.pos_N, self.pos_N*1.5, self.angle_N, self.angle_N, self.angle_N] 
 

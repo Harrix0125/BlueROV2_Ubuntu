@@ -1,7 +1,7 @@
 from acados_template import AcadosModel
 import casadi as cas
 import numpy as np
-from nmpc_params import NMPC_params as MPCC
+from mpc_controller.mpc_controller.BlueROV2.config.nmpc_params import NMPC_params as MPCC
 import utils as utils
 
 def export_bluerov_model():

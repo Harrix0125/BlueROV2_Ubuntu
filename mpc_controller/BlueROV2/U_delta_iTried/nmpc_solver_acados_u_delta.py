@@ -2,7 +2,7 @@ from acados_template import AcadosOcp, AcadosOcpSolver
 from model_u_delta import export_bluerov_model
 import numpy as np
 import scipy.linalg
-from nmpc_params import NMPC_params as MPCC
+from mpc_controller.mpc_controller.BlueROV2.config.nmpc_params import NMPC_params as MPCC
 import os
 
 # Wrapper class for Acados NMPC Solver

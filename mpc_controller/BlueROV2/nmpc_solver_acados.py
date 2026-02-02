@@ -1,6 +1,6 @@
 from acados_template import AcadosOcp, AcadosOcpSolver
 
-from .model import export_vehicle_model
+from core.model import export_vehicle_model
 
 # from model import export_vehicle_model
 

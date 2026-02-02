@@ -3,14 +3,14 @@ import matplotlib.pyplot as plt
 import time
 from mpl_toolkits.mplot3d import Axes3D
 from estimator import EKF
-from target_estimator import TargetTrackerKF
+from mpc_controller.mpc_controller.BlueROV2.estimators.target_estimator import TargetTrackerKF
 import casadi as cas
 
 from nmpc_solver_acados_u_delta import Acados_Solver_Wrapper
-from nmpc_params import NMPC_params as MPCC
+from mpc_controller.mpc_controller.BlueROV2.config.nmpc_params import NMPC_params as MPCC
 from utils import utils
 import utils_u_delta
-from plotters import LOS_plot_dynamics, plot_double_target_3d, plot_TT_3d, LOS_plot_camera_fov
+from mpc_controller.mpc_controller.BlueROV2.utils.plotters import LOS_plot_dynamics, plot_double_target_3d, plot_TT_3d, LOS_plot_camera_fov
 def simulation():
     # Initialize the new Acados solver
     # This will trigger code generation and compilation (takes time once)

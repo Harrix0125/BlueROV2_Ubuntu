@@ -1,3 +1,13 @@
+import sys
+import os
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+bluerov_path = os.path.join(current_dir, 'BlueROV2')
+
+if bluerov_path not in sys.path:
+    sys.path.append(bluerov_path)
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
@@ -11,13 +21,19 @@ from std_msgs.msg import Float64
 import numpy as np
 import scipy.spatial.transform.rotation as R
 
-from .BlueROV2.nmpc_params import GazeboROV_Params
-from .BlueROV2.nmpc_solver_acados import Acados_Solver_Wrapper
-from .BlueROV2.AEKFD import AEKFD
-from .BlueROV2.model import export_vehicle_model
-from .BlueROV2.target_estimator import VisualTarget
-from .BlueROV2.utils import Vehicle_Utils
-from .BlueROV2.plotters import LOS_interactive_viewer
+from BlueROV2.config.nmpc_params import GazeboROV_Params
+
+from BlueROV2.nmpc_solver_acados import Acados_Solver_Wrapper
+
+from BlueROV2.core.model import export_vehicle_model
+
+from BlueROV2.estimators.target_estimator import VisualTarget
+from BlueROV2.estimators.aekfd import AEKFD
+
+from BlueROV2.utils.plotters import LOS_interactive_viewer, LOS_plot_camera_fov
+from BlueROV2.utils.plant_sim import Vehicle_Sim_Utils as Vehicle_Utils 
+
+from BlueROV2.guidance import get_shadow_ref, get_shadow_traj
 
 
 class BlueROVMPC(Node):
@@ -83,6 +99,9 @@ class BlueROVMPC(Node):
         self.history_rov_x = []
         self.history_rov_y = []
         self.history_rov_z = []
+        self.history_rov_ph = []
+        self.history_rov_th = []
+        self.history_rov_ps = []
         self.history_target = []
 
 
@@ -120,6 +139,10 @@ class BlueROVMPC(Node):
         self.history_rov_x.append(x)
         self.history_rov_y.append(y)
         self.history_rov_z.append(z)
+        self.history_rov_ph.append(phi)
+        self.history_rov_th.append(theta)
+        self.history_rov_ps.append(psi)
+
         self.history_target.append(self.state_moving[self.actual_step, 0:6])
 
         self.ekf.predict(self.u_previous)
@@ -147,8 +170,8 @@ class BlueROVMPC(Node):
             est_target_pos = est_target[0:3]
             est_target_vel = est_target[3:6]
 
-            self.ref_target = self.sim.get_shadow_traj(x_est[0:12], est_target_pos, est_target_vel, dt = self.my_params.T_s,horizon_N = self.my_params.N+1, desired_dist=2.5)
-            #self.ref_target = self.sim.get_shadow_ref(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+            self.ref_target = get_shadow_traj(x_est[0:12], est_target_pos, est_target_vel, dt = self.my_params.T_s,horizon_N = self.my_params.N+1, desired_dist=2.5)
+            #self.ref_target = get_shadow_ref(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
 
         elif not is_visible and self.seen_it_once:
 
@@ -156,7 +179,7 @@ class BlueROVMPC(Node):
             est_target = self.camera_data.get_camera_estimate(x_est[0:12], dt = self.my_params.T_s, camera_noise = self.camera_noise)
             est_target_pos = est_target[0:3]
             est_target_vel = est_target[3:6]
-            self.ref_target = self.sim.get_shadow_ref(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.0)
+            self.ref_target = get_shadow_ref(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.0)
                 
             if self.camera_data.last_seen_t > 5.0:
                 # If not seen for more than 5 seconds, just stay still
@@ -256,10 +279,14 @@ def main(args=None):
         rov_x = np.array(node.history_rov_x)
         rov_y = np.array(node.history_rov_y)
         rov_z = np.array(node.history_rov_z)
+        rov_ph = np.array(node.history_rov_ph)
+        rov_th = np.array(node.history_rov_th)
+        rov_ps = np.array(node.history_rov_ps)
         target_data = np.array(node.history_target)
         dt = node.my_params.T_s
 
         node.sim.get_error_avg_std([rov_x, rov_y, rov_z], node.state_moving[:,:3].T, target_data[:,:3].T)
+        LOS_plot_camera_fov(rov_x, rov_y, rov_z, rov_ps, rov_th, node.state_moving, dt)
 
         if len(rov_x) > 0:
             slider, fig = LOS_interactive_viewer(rov_x, rov_y, rov_z, target_data, dt)

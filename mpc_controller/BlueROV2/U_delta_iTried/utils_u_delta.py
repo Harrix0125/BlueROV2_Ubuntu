@@ -1,7 +1,7 @@
 import numpy as np
 import casadi as cas
 import matplotlib.pyplot as plt
-from nmpc_params import NMPC_params as MPCC
+from mpc_controller.mpc_controller.BlueROV2.config.nmpc_params import NMPC_params as MPCC
 import utils as utils
 
 def get_standoff_reference(rov_state, target_state, desired_dist=2.0, lookahead=1.0, time_predict=1.8):
