@@ -385,18 +385,19 @@ class BlueBoat_Params(NMPC_params):
         super().__init__()
         self.nu = 2  # just 2 thrusters
         
-        # random physics for boat
-        self.m = 19.5
+        # There are no scientific papers talking about this data for the BlueBoat model, i can try give some params myself: as 
+        #   surface vehicle there should be no real problem with the implememtation as the 2 thrusters would adapt with the disturbances for model uncertainties
+        self.m = 17.5
         self.W = self.m * 9.81
         self.B = self.W  # floats
         self.zg = 0.05   # erm
         
         self.fov_h = 180
         self.fov_v = 180
-        # random
-        self.Ix = 5.0   # Roll (difficile da ruotare)
-        self.Iy = 8.0   # Pitch
-        self.Iz = 4.5   # Yaw
+        
+        self.Ix = 5.0   
+        self.Iy = 8.0   
+        self.Iz = 4.5   
 
         # --- TAM (Thruster Allocation Matrix) ---
         d = 0.435 
@@ -409,7 +410,7 @@ class BlueBoat_Params(NMPC_params):
             [-d,    d  ]   # Yaw (N): One clockwise, other counterclockwise
         ])
         
-        # Needed for Coriolis, they are improvised...
+        # Needed for Coriolis, again not true values
         self.X_ud = 2.0 
         self.Y_vd = 10.0 
         self.Z_wd = 20.0 

@@ -467,7 +467,7 @@ class Vehicle_Utils:
         Calculates Mean Absolute Error (MAE) and Euclidean distance.
         Arguments must be convertible to numpy arrays of shape (3, N).
         """
-        # 1. Convert everything to consistent NumPy arrays (3, N)
+        # Convert everything to consistent NumPy arrays (3, N)
         #    Rows = x, y, z; Cols = Time steps
         est = np.array(state_estimate) 
         tgt = np.array(target_state)
@@ -489,25 +489,24 @@ class Vehicle_Utils:
                 print(f"Shape mismatch! Est: {est.shape}, Tgt: {tgt.shape}")
                 ref = ref[:,:min_len]
 
-        # 2. Calculate Errors for TARGET
+        # Calculate Errors for TARGET
         # Difference at every step
         diff_matrix = est - tgt
         
-        # A. Per-axis Mean Absolute Error (MAE)
+        # Per-axis Mean Absolute Error (MAE)
         # Average across time (axis 1)
         mae_x, mae_y, mae_z = np.mean(np.abs(diff_matrix), axis=1)
         
-        # B. 3D Euclidean Distance (Average tracking error)
+        # 3D Euclidean Distance (Average tracking error)
         # Norm at each step, then mean
         dist_3d = np.linalg.norm(diff_matrix, axis=0)
         avg_3d_dist = np.mean(dist_3d)
 
-        # 3. Calculate Errors for REFERENCE (Virtual Carrot)
+        # Calculate Errors for REFERENCE (Virtual Carrot)
         diff_ref = est - ref
         dist_ref_3d = np.linalg.norm(diff_ref, axis=0)
         avg_ref_dist = np.mean(dist_ref_3d)
 
-        # 4. Print Results
         print("-" * 30)
         print(f"TRACKING PERFORMANCE:")
         print(f"  Avg 3D Error: {avg_3d_dist:.4f} m")
@@ -517,7 +516,6 @@ class Vehicle_Utils:
         print(f"  Avg Dist from Ref: {avg_ref_dist:.4f} m")
         print("-" * 30)
 
-        # Return dictionary for logging if needed
         return {
             'mae_x': mae_x,
             'mae_y': mae_y,

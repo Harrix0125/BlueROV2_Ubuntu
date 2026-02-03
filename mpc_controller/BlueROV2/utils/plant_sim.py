@@ -7,26 +7,33 @@ class Vehicle_Sim_Utils:
         self.p = params
 
     def get_C_np(self, nu):
-        """ Numpy Coriolis Matrix """
         C_rb = np.zeros((6, 6))
-        m, Ix, Iy, Iz = self.p.m, self.p.Ix, self.p.Iy, self.p.Iz
-        
-        C_rb[0, 4] =  m * nu[2];  C_rb[0, 5] = -m * nu[1]
-        C_rb[1, 3] = -m * nu[2];  C_rb[1, 5] =  m * nu[0]
-        C_rb[2, 3] =  m * nu[1];  C_rb[2, 4] = -m * nu[0]
-        C_rb[3, 1] =  m * nu[2];  C_rb[3, 2] = -m * nu[1]; C_rb[3, 4] = Iz * nu[5]; C_rb[3, 5] = -Iy * nu[4]
-        C_rb[4, 0] = -m * nu[2];  C_rb[4, 2] =  m * nu[0]; C_rb[4, 3] = -Iz * nu[5]; C_rb[4, 5] = Ix * nu[3]
-        C_rb[5, 0] =  m * nu[1];  C_rb[5, 1] = -m * nu[0]; C_rb[5, 3] = Iy * nu[4]; C_rb[5, 4] = -Ix * nu[3]
+        # Row 0
+        C_rb[0, 4] =  self.p.m * nu[2];  C_rb[0, 5] = -self.p.m * nu[1]
+        # Row 1
+        C_rb[1, 3] = -self.p.m * nu[2];  C_rb[1, 5] =  self.p.m * nu[0]
+        # Row 2
+        C_rb[2, 3] =  self.p.m * nu[1];  C_rb[2, 4] = -self.p.m * nu[0]
+        C_rb[3, 1] =  self.p.m * nu[2];  C_rb[3, 2] = -self.p.m * nu[1]; C_rb[3, 4] = self.p.Iz * nu[5]; C_rb[3, 5] = -self.p.Iy * nu[4]
+        C_rb[4, 0] = -self.p.m * nu[2];  C_rb[4, 2] =  self.p.m * nu[0]; C_rb[4, 3] = -self.p.Iz * nu[5]; C_rb[4, 5] = self.p.Ix * nu[3]
+        C_rb[5, 0] =  self.p.m * nu[1];  C_rb[5, 1] = -self.p.m * nu[0]; C_rb[5, 3] = self.p.Iy * nu[4]; C_rb[5, 4] = -self.p.Ix * nu[3]
 
         C_a = np.zeros((6, 6))
-        # (Simplified C_a filling for brevity, assuming same logic as original file)
         C_a[0, 4] = -self.p.Z_wd * nu[2]; C_a[0, 5] =  self.p.Y_vd * nu[1]
-        # ... (Include all other C_a terms from original utils.py) ...
-        
-        return C_rb + C_a
+        C_a[1, 3] =  self.p.Z_wd * nu[2]; C_a[1, 5] = -self.p.X_ud * nu[0]
+        C_a[2, 3] = -self.p.Y_vd * nu[1]; C_a[2, 4] =  self.p.X_ud * nu[0]
+        C_a[3, 1] = -self.p.Z_wd * nu[2]; C_a[3, 2] =  self.p.Y_vd * nu[1]; C_a[3, 4] = -self.p.N_rd * nu[5]; C_a[3, 5] = self.p.M_qd * nu[4]
+        C_a[4, 0] =  self.p.Z_wd * nu[2]; C_a[4, 2] = -self.p.X_ud * nu[0]; C_a[4, 3] =  self.p.N_rd * nu[5]; C_a[4, 5] = -self.p.K_pd * nu[3]
+        C_a[5, 0] = -self.p.Y_vd * nu[1]; C_a[5, 1] =  self.p.X_ud * nu[0]; C_a[5, 3] = -self.p.M_qd * nu[4]; C_a[5, 4] = self.p.K_pd * nu[3]
+
+        coriolis_sum =  C_a + C_rb
+
+        return coriolis_sum
 
     def get_x_dot(self, x_state, u_control, disturbance=None):
-        """ Calculates x_dot = f(x, u) using Numpy. """
+        """ 
+        Calculates x_dot = f(x u) using Numpy. 
+        """
         if disturbance is None: disturbance = np.zeros(6)
         eta = x_state[0:6]
         nu  = x_state[6:12]
@@ -53,7 +60,12 @@ class Vehicle_Sim_Utils:
         return np.concatenate((pos_dot, att_dot, acc))
 
     def robot_plant_step_RK4(self, x_current, u_control, dt, disturbance=None):
-        """ Runge-Kutta 4 Integrator """
+        """ 
+        Runge-Kutta 4 Integrator 
+        """
+        if disturbance is None:
+            disturbance = np.zeros(6)
+
         k1 = self.get_x_dot(x_current, u_control, disturbance)
         k2 = self.get_x_dot(x_current + 0.5 * dt * k1, u_control, disturbance)
         k3 = self.get_x_dot(x_current + 0.5 * dt * k2, u_control, disturbance)
@@ -61,7 +73,9 @@ class Vehicle_Sim_Utils:
         return x_current + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
 
     def generate_target_trajectory(self, steps, dt, speed):
-        """ Generates random target movement for testing. """
+        """ 
+        Generates random target movement for testing. 
+        """
         # [Copy the exact implementation from your original utils.py here]
         # ... (Logic for random walk/trajectory) ...
         states = np.zeros((steps, 12))
@@ -104,19 +118,127 @@ class Vehicle_Sim_Utils:
 
     def get_linear_traj(self, steps, dt, speed):
         """ Generates linear trajectory. """
-        # [Copy exact implementation from original utils.py]
         states = np.zeros((steps, 12))
+
         states[0,0] = 1.8
         states[0,1] = -3
         states[0,2] = -1.5
         states[0,6] = speed
-        # ... rest of linear traj logic ...
+        
+        current_x, current_y = states[0, 0], states[0, 1]
+        dx = speed * np.cos(states[0,4]) * np.cos(states[0,5])
+        dy = speed * np.cos(states[0,4]) * np.sin(states[0,5])
+
+        for k in range(steps-1):
+            current_x += dx * dt
+            current_y += dy * dt
+            states[k+1, 0] = current_x
+            states[k+1, 1] = current_y
+            states[k+1, 2:11] = states[0, 2:11]
+        return states
+    
+    def get_random_traj(self, steps, dt, speed):
+        """ Generates rnd trajectory. """
+        states = np.zeros((steps, 12))
+
+        states[0,0] = 1.8
+        states[0,1] = -3
+        states[0,2] = -1.5
+        states[0,6] = speed
+        change_dir = []
+        seconds = steps*dt
+        act_steps = 0
+        incremental_speed = 0.8
+        min_secs = 2
+        max_secs = 11
+        speed_cap = 1.9
+        
+        while (act_steps*dt) < seconds:
+            ankle_breaker = np.random.randint(min_secs/dt, max_secs/dt)      # in steps
+            if (ankle_breaker*dt + act_steps*dt) > seconds:     # sec + sec > sec
+                break
+            act_steps += ankle_breaker                          # step += steps
+            change_dir.append(act_steps)                        # append the step
+        current_x, current_y = states[0, 0], states[0, 1]
+        dx = speed * np.cos(states[0,4]) * np.cos(states[0,5])
+        dy = speed * np.cos(states[0,4]) * np.sin(states[0,5])
+        number_ankles_broken = 0   # index of #change directions
+        
+        for k in range(steps-1):
+            current_x += dx * dt
+            current_y += dy * dt
+
+            if number_ankles_broken < len(change_dir) and k == change_dir[number_ankles_broken]:
+                number_ankles_broken +=1
+                states[0,5] += np.deg2rad(np.random.randint(-75,75))
+                speed = min(speed_cap, speed + incremental_speed)+0.1
+                dx = speed * np.cos(states[0,4]) * np.cos(states[0,5])
+                dy = speed * np.cos(states[0,4]) * np.sin(states[0,5])
+
+            speed = max(0,speed - incremental_speed*(2/(min_secs+ max_secs))) 
+            states[k+1, 0] = current_x
+            states[k+1, 1] = current_y
+            states[k+1, 2:11] = states[0, 2:11]
+
         return states
 
     def get_error_avg_std(self, state_estimate, target_state, ref_state):
-        """ Calculates performance metrics. """
-        # [Copy exact implementation from original utils.py]
-        est = np.array(state_estimate)
+        """
+        Calculates Mean Absolute Error (MAE) and Euclidean distance.
+        Arguments must be convertible to numpy arrays of shape (3, N).
+        """
+        # Convert everything to consistent NumPy arrays (3, N)
+        #    Rows = x, y, z; Cols = Time steps
+        est = np.array(state_estimate) 
         tgt = np.array(target_state)
-        # ... calculation logic ...
-        return {} # dictionary results
+        ref = np.array(ref_state)
+
+        # Safety check for shapes
+        if est.shape != tgt.shape:
+            # Handle case where target might be transposed compared to estimate
+            if est.shape == tgt.T.shape:
+                tgt = tgt.T
+            elif est.shape == tgt.shape:
+                tgt = tgt
+            else:
+                min_len = min(est.shape[1], tgt.shape[1])
+                min_len = min(min_len, ref.shape[1])
+                est = est[:, :min_len]
+                tgt = tgt[:, :min_len]
+                print(f"Synchronized to length: {min_len}")
+                print(f"Shape mismatch! Est: {est.shape}, Tgt: {tgt.shape}")
+                ref = ref[:,:min_len]
+
+        # Calculate Errors for TARGET
+        # Difference at every step
+        diff_matrix = est - tgt
+        
+        # Per-axis Mean Absolute Error (MAE)
+        # Average across time (axis 1)
+        mae_x, mae_y, mae_z = np.mean(np.abs(diff_matrix), axis=1)
+        
+        # 3D Euclidean Distance (Average tracking error)
+        # Norm at each step, then mean
+        dist_3d = np.linalg.norm(diff_matrix, axis=0)
+        avg_3d_dist = np.mean(dist_3d)
+
+        # Calculate Errors for REFERENCE (Virtual Carrot)
+        diff_ref = est - ref
+        dist_ref_3d = np.linalg.norm(diff_ref, axis=0)
+        avg_ref_dist = np.mean(dist_ref_3d)
+
+        print("-" * 30)
+        print(f"TRACKING PERFORMANCE:")
+        print(f"  Avg 3D Error: {avg_3d_dist:.4f} m")
+        print(f"  MAE X: {mae_x:.4f} m")
+        print(f"  MAE Y: {mae_y:.4f} m")
+        print(f"  MAE Z: {mae_z:.4f} m")
+        print(f"  Avg Dist from Ref: {avg_ref_dist:.4f} m")
+        print("-" * 30)
+
+        return {
+            'mae_x': mae_x,
+            'mae_y': mae_y,
+            'mae_z': mae_z,
+            'avg_3d': avg_3d_dist
+        }

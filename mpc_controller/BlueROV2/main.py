@@ -27,24 +27,22 @@ def simulation():
     print("Compilation Complete.")
 
 
-
     # I'll clean this up i swear
+    # ----- Simulation data collection -----
     traj_x, traj_y, traj_z = [], [], []
     traj_phi, traj_theta, traj_psi = [], [], []
-
     EKFtraj_x, EKFtraj_y, EKFtraj_z = [], [], []
     EKFtraj_phi, EKFtraj_theta, EKFtraj_psi = [], [], []
-
     ref_x, ref_y, ref_z = [], [], []
-
     target_estimation_x, target_estimation_y, target_estimation_z = [], [], []
     est_target_pos = np.zeros(3)
-
     thrust_history = [] 
     u_previous = np.zeros(my_params.nu)
     MAX_DELTA = my_params.THRUST_MAX * my_params.T_s *1000
 
-    t_simulation = 30 #sec
+
+    #   ----- Similation -----
+    t_simulation = 50 #sec
     steps_tot = int(t_simulation /  my_params.T_s)
 
     # Assuming that this is the data we get from our ideal camera system
@@ -53,19 +51,23 @@ def simulation():
 
 
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
-    round = 4
+    round = 5
     if round == 3:      # Straight line
-        state_moving = sim.get_linear_traj(steps_tot, my_params.T_s, speed=0.9)
+        state_moving = sim.get_linear_traj(steps_tot, my_params.T_s, speed=0.5)
     elif round == 4:    # Mad fella trajectory
         state_moving = sim.generate_target_trajectory(steps_tot, my_params.T_s, speed=0.9)
+    elif round == 5:    # Very mad trajectory
+        state_moving = sim.get_random_traj(steps_tot, my_params.T_s, speed=0.7)
 
 
-    #EKF Setup
+
+
+    # ----- EKF Setup -----
     acados_model = export_vehicle_model(my_params)
     ekf = EKF(acados_model, my_params)
     ekf.set_state_estimate(state_now)
 
-    # State estimate initialization for EKF with disturbance states
+    # State estimate initialization for EKF with disturbance states:
     state_est = np.zeros(12)
     state_est[0:12] = np.copy(state_now)
 
@@ -74,21 +76,24 @@ def simulation():
     is_there_noise = True
     noise_ekf = my_params.noise_ekf if is_there_noise else np.array([0.0]*12)    
     print("noise_ekf:", noise_ekf)
-    # Camera Model Setup
+
+
+    # ----- Camera Model Setup -----
     camera_data = VisualTarget(start_state=state_moving[0,:], fov_h=my_params.fov_h, fov_v=my_params.fov_v, max_dist=10)
     camera_noise = np.random.normal(0, 0.006, 3) if is_there_noise else np.array([0.0]*3)
     seen_it_once = False
     wait_here = np.copy(state_now[0:12])
 
-    # External Disturbance setup:
+
+    # ----- External Disturbance setup -----
     is_there_disturbance = False
     estimated_disturbance = np.zeros(6)
     force_world = np.array([-30,-30, 0])
     tether_disturbance = np.array([0,0,0,0,0,0])
     real_disturbance = np.zeros(6)
 
+
     if round > 2:
-        print("BLEEEP")
         for i in range(steps_tot): 
             camera_data.truth_update(state_moving[i,0:6])
 
@@ -199,39 +204,37 @@ def simulation():
             traj_psi.append(state_now[5])   # Yaw
             thrust_history.append(u_optimal)
     
-
-
-
     # Plotting
     t_end = time.time()
     t_sum = t_end - t0
     print(f"{t_sum:.4f}s is the total computational time!")
     
     print("Plotting results...")
-    thrust_history = np.array(thrust_history)
-    if round >= 3:
-        
-        plot_TT_3d(state_moving[:,0], state_moving[:,1], state_moving[:,2],
-                    ref_x, ref_y, ref_z, # Reference
-                    np.array(traj_x), np.array(traj_y), np.array(traj_z),    # ROV Position
-                    np.array(traj_phi), np.array(traj_theta), np.array(traj_psi), # ROV Angles
-                    thrust_history, my_params.T_s
-                )
-        
-        LOS_plot_dynamics(traj_x, traj_y, traj_z, state_moving, my_params.T_s, desired_dist=2.0)
 
-        if testing_EKF:
-            plot_TT_3d(np.array(target_estimation_x), np.array(target_estimation_y), np.array(target_estimation_z),
-                    ref_x, ref_y, ref_z, # Reference
-                    np.array(traj_x), np.array(traj_y), np.array(traj_z),    # ROV Position
-                    np.array(traj_phi), np.array(traj_theta), np.array(traj_psi), # ROV Angles
-                    thrust_history, my_params.T_s
-                )
-            LOS_plot_dynamics(EKFtraj_x, EKFtraj_y, EKFtraj_z, state_moving, my_params.T_s, desired_dist=2.0)
+    thrust_history = np.array(thrust_history)
+    plot_TT_3d(state_moving[:,0], state_moving[:,1], state_moving[:,2],
+        ref_x, ref_y, ref_z, # Reference
+        np.array(traj_x), np.array(traj_y), np.array(traj_z),    # ROV Position
+        np.array(traj_phi), np.array(traj_theta), np.array(traj_psi), # ROV Angles
+        thrust_history, my_params.T_s
+    )
+        
+    LOS_plot_dynamics(traj_x, traj_y, traj_z, state_moving, my_params.T_s, desired_dist=2.0)
+
+    if testing_EKF:
+        plot_TT_3d(np.array(target_estimation_x), np.array(target_estimation_y), np.array(target_estimation_z),
+            ref_x, ref_y, ref_z, # Reference
+            np.array(traj_x), np.array(traj_y), np.array(traj_z),    # ROV Position
+            np.array(traj_phi), np.array(traj_theta), np.array(traj_psi), # ROV Angles
+            thrust_history, my_params.T_s
+        )
+        LOS_plot_dynamics(EKFtraj_x, EKFtraj_y, EKFtraj_z, state_moving, my_params.T_s, desired_dist=2.0)
             
         LOS_plot_camera_fov(traj_x, traj_y, traj_z, traj_psi, traj_theta, state_moving, my_params.T_s)
         sim.get_error_avg_std([traj_x, traj_y, traj_z], state_moving[:,:3].T, [ref_x, ref_y, ref_z])
         plt.show()
+
+
 
 def cap_input(u_previous, u_optimal, MAX_DELTA = 35.0):
     u_output = np.zeros(len(u_optimal))
@@ -243,5 +246,7 @@ def cap_input(u_previous, u_optimal, MAX_DELTA = 35.0):
         else:
             u_output[i] = u_optimal[i]
     return u_output
+
+
 if __name__ == "__main__":
     simulation()
