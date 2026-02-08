@@ -20,7 +20,9 @@ class Acados_Solver_Wrapper:
         nx = self.params.nx
         nu = self.params.nu  # 8 for BlueROV2, 2 for BlueBoat
         ny = nx + nu 
+
         self.ocp.dims.N = self.params.N
+
 
         self.ocp.parameter_values = np.zeros(6)  # Disturbance parameter (i forgot before ops)
 

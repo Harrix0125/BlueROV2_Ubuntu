@@ -52,7 +52,7 @@ class Vehicle_Sim_Utils:
             0.0
         ])
 
-        acc = self.p.M_INV @ (tau - damping - g_force - (self.get_C_np(nu) @ nu) + disturbance)
+        acc = self.p.M_INV @ (tau - damping - g_force + (self.get_C_np(nu) @ nu) + disturbance)
         
         pos_dot = get_J1_np(phi, theta, psi) @ nu[0:3]
         att_dot = get_J2_np(phi, theta, psi) @ nu[3:6]

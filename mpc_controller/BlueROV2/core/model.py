@@ -139,4 +139,4 @@ def get_C_SX(nu, params):
     C_a[4, 5] = -b1;   C_a[4, 3] = -b3;  C_a[4, 2] =  a1;  C_a[4, 0] = -a3
     C_a[5, 4] =  b1;   C_a[5, 3] =  b2;  C_a[5, 1] = -a1;  C_a[5, 0] =  a2
 
-    return   C_a + C_rb
+    return   C_rb

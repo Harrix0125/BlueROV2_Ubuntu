@@ -3,7 +3,7 @@ import casadi as cas
 
 class NMPC_params:
 
-    N = 180          # Prediction horizon (steps)
+    N = 200          # Prediction horizon (steps) -> inside the solver i put them to 30 if nu = 2
     T_s = 0.05      # Time step (seconds) - between 10-20Hz ideally
 
     def __init__(self):
@@ -276,20 +276,12 @@ class GazeboROV_Params(NMPC_params):
         self.D_QUAD_COEFFS = np.array([-self.X_uu, -self.Y_vv, -self.Z_ww, -self.K_pp, - self.M_qq, -self.N_rr])
 
         # Thruster Allocation self.matrix - 6x8
-        # self.TAM = np.array([
-        #     [-1*0.707, -1*0.707,  +1*0.707,  +1*0.707,  0.0,    0.0,    0.0,    0.0   ],
-        #     [ -1*0.707, +1*0.707, -1*0.707,  +1*0.707,  0.0,    0.0,    0.0,    0.0   ],
-        #     [ 0.0,    0.0,    0.0,    0.0,              -1.0,   -1.0,   -1.0,    -1.0   ],
-        #     [ -1*0.00,   +1*0.00,  -1*0.00,  +1*0.00,  0.218, -0.218,  0.218,  -0.218 ],
-        #     [ +1*0.00,  +1*0.00,   -1*0.00,  -1*0.00,   0.120, 0.120, -0.120,  -0.120 ],
-        #     [ -1*0.1888,-1*0.1888, +1*0.1888, +1*0.1888, 0.0,   0.0,    0.0,    0.0   ]
-        # ])
         self.TAM = np.array([
             [ -0.707, -0.707,  0.707,  0.707,  0.000,  0.000,  0.000,  0.000],
             [-0.707,  0.707, -0.707,  0.707,  0.000,  0.000,  0.000,  0.000],
             [ 0.000,  0.000,  0.000,  0.000,  -1.000,  -1.000,  -1.000,  -1.000],
-            [ 0.000,  0.000,  0.000,  0.000,  0.215, -0.215,  0.215, -0.215],
-            [ 0.000,  0.000,  0.000,  0.000,  0.118,  0.118, -0.118, -0.118],
+            [ 0.000,  0.000,  0.000,  0.000,  0.218, -0.218,  0.218, -0.218],
+            [ 0.000,  0.000,  0.000,  0.000,  0.120,  0.120, -0.120, -0.120],
             [ -0.160, 0.160,  0.160, -0.160,  0.000,  0.000,  0.000,  0.000]  
         ])
 
@@ -391,13 +383,15 @@ class BlueBoat_Params(NMPC_params):
         self.W = self.m * 9.81
         self.B = self.W  # floats
         self.zg = 0.05   # erm
+        self.zb = 0.00   # erm
+
         
-        self.fov_h = 180
-        self.fov_v = 180
+        self.fov_h = 90
+        self.fov_v = 90
         
-        self.Ix = 5.0   
-        self.Iy = 8.0   
-        self.Iz = 4.5   
+        self.Ix = 2.4   
+        self.Iy = 4.0   
+        self.Iz = 5.6   
 
         # --- TAM (Thruster Allocation Matrix) ---
         d = 0.435 
@@ -411,48 +405,48 @@ class BlueBoat_Params(NMPC_params):
         ])
         
         # Needed for Coriolis, again not true values
-        self.X_ud = 2.0 
-        self.Y_vd = 10.0 
-        self.Z_wd = 20.0 
-        self.K_pd = 1.0
-        self.M_qd = 5.0
-        self.N_rd = 3.0
+        self.X_ud = -2.0 
+        self.Y_vd = -10.0 
+        self.Z_wd = -20.0 
+        self.K_pd = -1.0
+        self.M_qd = -5.0
+        self.N_rd = -3.0
 
         # Linear Damping
         self.D_LIN = -np.diag([3.0, 80.0, 50.0, 20.0, 20.0, 5.0]) 
         # Nota: Y_v (80) to simulate lateral resistance
         
         # Quadratic Damping (imaginary)
-        self.D_QUAD_COEFFS = np.array([15.0, 100.0, 100.0, 50.0, 50.0, 15.0])
+        self.D_QUAD_COEFFS = np.array([5.0, 120.0, 100.0, 50.0, 50.0, 15.0])
 
         # Semplification: needed
-        M_diag = np.array([self.m, self.m+10, self.m+20, self.Ix, self.Iy, self.Iz])
+        M_diag = np.array([self.m, self.m, self.m, self.Ix, self.Iy, self.Iz])
         self.M_INV = np.diag(1.0/M_diag)
 
         # Limiti Motori
-        self.THRUST_MIN = -40.0 
+        self.THRUST_MIN = -50.0 
         self.THRUST_MAX = 50.0  
-        self.R_THRUST = 0.1
+        self.R_THRUST = 3
 
         # --- TUNING NMPC ---
         # = 0 what we cant control
         # [x, y, z, phi, theta, psi]
-        self.Q_POS = [20, 20, 0.1, 0.1, 0.1, 60]
+        self.Q_POS = [25, 25, 0.1, 0.1, 0.1, 10]
         # [u, v, w, p, q, r]
-        self.Q_VEL = [5, 5, 0.1, 0.1, 0.1, 5.0]
+        self.Q_VEL = [15, 1, 0.1, 0.1, 0.1, 5.0]
         self.Q_diag = self.Q_POS + self.Q_VEL
         self.Q = cas.diag(self.Q_diag)
 
 
         # [x, y, z, phi, theta, psi]
-        self.Q_POS_N = [200, 200, 0.1, 0.1, 0.1, 100]
+        self.Q_POS_N = [200, 200, 0.1, 0.1, 0.1, 50]
         # [u, v, w, p, q, r]
-        self.Q_VEL_N = [20, 20, 0.1, 0.1, 0.1, 10]
+        self.Q_VEL_N = [20, 0.1, 0.1, 0.1, 0.1, 10]
         self.Q_diag_N = self.Q_POS_N + self.Q_VEL_N
         self.Q_N = cas.diag(self.Q_diag_N)
 
-        self.z_min = -10 
-        self.z_max = 10
+        self.z_min = -100 
+        self.z_max = 100
 
 
         # --- TUNING KALMAN FILTER (AEKFD) ---        
@@ -461,7 +455,7 @@ class BlueBoat_Params(NMPC_params):
         #    High Q = Physics is uncertain, rely more on sensors
         #    Low Q = Physics is perfect, ignore noisy sensors
         # Z, Roll, Pitch = 0 for process noise
-        q_pos   = [0.5,  0.5,  1e-3]  # x, y, z (z bloccato)
+        q_pos   = [0.5,  0.5,  10]  # x, y, z (z bloccato)
         q_att   = [1e-3, 1e-3, 0.5 ]  # phi, theta, psi (roll/pitch bloccati)
         q_vel   = [0.5,  0.5,  1e-3]  # u, v, w (w bloccato)
         q_rates = [1e-3, 1e-3, 0.5 ]  # p, q, r

@@ -9,9 +9,9 @@ from config.nmpc_params import BlueROV_Params, BlueBoat_Params
 from core.model import export_vehicle_model
 from utils.plotters import LOS_plot_dynamics, plot_TT_3d, LOS_plot_camera_fov
 from utils.plant_sim import Vehicle_Sim_Utils as Vehicle_Utils 
-from guidance import get_shadow_ref, get_shadow_traj
+from guidance import get_shadow_ref, get_shadow_traj, get_shadow_LOS
 def simulation():
-    vehicle_type = "ROV"
+    vehicle_type = "BOAT"
     state_now = np.zeros(12)
     
     if vehicle_type == "ROV":
@@ -42,7 +42,7 @@ def simulation():
 
 
     #   ----- Similation -----
-    t_simulation = 50 #sec
+    t_simulation = 40 #sec
     steps_tot = int(t_simulation /  my_params.T_s)
 
     # Assuming that this is the data we get from our ideal camera system
@@ -51,7 +51,7 @@ def simulation():
 
 
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
-    round = 5
+    round = 3
     if round == 3:      # Straight line
         state_moving = sim.get_linear_traj(steps_tot, my_params.T_s, speed=0.5)
     elif round == 4:    # Mad fella trajectory
@@ -73,7 +73,7 @@ def simulation():
 
     # Too many flags
     testing_EKF = True
-    is_there_noise = True
+    is_there_noise = False
     noise_ekf = my_params.noise_ekf if is_there_noise else np.array([0.0]*12)    
     print("noise_ekf:", noise_ekf)
 
@@ -104,9 +104,13 @@ def simulation():
                 est_target = camera_data.get_camera_estimate(state_est[0:12], dt = my_params.T_s, camera_noise = camera_noise)
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
+                if vehicle_type == "ROV":
+                    ref_guidance = get_shadow_traj(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
+                    #ref_guidance = get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+                elif vehicle_type == "BOAT":
+                    print("hi")
+                    ref_guidance = get_shadow_LOS(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
 
-                #ref_guidance = get_shadow_traj(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
-                ref_guidance = get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
 
             elif not is_visible and seen_it_once:
 
@@ -114,7 +118,11 @@ def simulation():
                 est_target = camera_data.get_camera_estimate(state_est[0:12], dt = my_params.T_s, camera_noise = camera_noise)
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
-                ref_guidance = get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.0)
+                if vehicle_type == "ROV":
+                    ref_guidance = get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.0)
+                elif vehicle_type == "BOAT":
+                    ref_guidance = get_shadow_LOS(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+                
                 
                 if camera_data.last_seen_t > 5.0:
                     # If not seen for more than 5 seconds, just stay still
@@ -129,6 +137,7 @@ def simulation():
 
             u_optimal = solver.solve(state_est, ref_guidance,  disturbance=estimated_disturbance)
             u_optimal = cap_input(u_previous, u_optimal, MAX_DELTA)
+            # u_optimal = [1,1]
             u_previous = u_optimal
 
             print("u_optimal: ", u_optimal)
@@ -184,7 +193,7 @@ def simulation():
                 target_estimation_y.append(est_target_pos[1])
                 target_estimation_z.append(est_target_pos[2])
 
-            camera_noise = np.random.normal(0, 0.006, 3)
+            camera_noise = np.random.normal(0, 0.006, 3) if is_there_noise else np.array([0.0]*3)
 
     # Straight line trajectory
     elif round == 3:
