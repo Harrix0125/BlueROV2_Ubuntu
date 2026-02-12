@@ -42,7 +42,7 @@ def simulation():
 
 
     #   ----- Similation -----
-    t_simulation = 40 #sec
+    t_simulation = 30 #sec
     steps_tot = int(t_simulation /  my_params.T_s)
 
     # Assuming that this is the data we get from our ideal camera system
@@ -51,7 +51,7 @@ def simulation():
 
 
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
-    round = 3
+    round = 4
     if round == 3:      # Straight line
         state_moving = sim.get_linear_traj(steps_tot, my_params.T_s, speed=0.5)
     elif round == 4:    # Mad fella trajectory

@@ -30,10 +30,10 @@ from BlueROV2.core.model import export_vehicle_model
 from BlueROV2.estimators.target_estimator import VisualTarget
 from BlueROV2.estimators.aekfd import AEKFD
 
-from BlueROV2.utils.plotters import LOS_interactive_viewer, LOS_plot_camera_fov
+from BlueROV2.utils.plotters import LOS_interactive_viewer, LOS_plot_camera_fov, LOS_plot_dynamics, plot_TT_3d
 from BlueROV2.utils.plant_sim import Vehicle_Sim_Utils as Vehicle_Utils 
 
-from BlueROV2.guidance import get_shadow_ref, get_shadow_traj
+from BlueROV2.guidance import get_shadow_ref, get_shadow_traj, get_shadow_LOS
 
 class BlueBoatMPC(Node):
     def __init__(self):
@@ -56,12 +56,12 @@ class BlueBoatMPC(Node):
         self.actual_step = 0
         self.sim = Vehicle_Utils(self.my_params)
 
-        self.state_moving = self.sim.generate_target_trajectory(self.steps_tot, self.my_params.T_s, speed=0.75)
+        self.state_moving = self.sim.get_linear_traj(self.steps_tot, self.my_params.T_s, speed=0.75)
 
-        self.camera_data = VisualTarget(start_state=self.state_moving[0,:], fov_h=self.my_params.fov_h, fov_v=self.my_params.fov_v, max_dist=10)
+        self.camera_data = VisualTarget(start_state=self.state_moving[0,:], fov_h=self.my_params.fov_h, fov_v=self.my_params.fov_v, max_dist=20)
         self.seen_it_once = False
         self.wait_here = np.copy(self.state_now[0:12])
-        self.camera_noise = np.random.normal(0, 0.00006, 3)
+        self.camera_noise = np.random.normal(0, 0.000, 3)
 
         qos_sensor = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -96,6 +96,12 @@ class BlueBoatMPC(Node):
         self.history_rov_th = []
         self.history_rov_ps = []
         self.history_target = []
+        self.history_ref = []
+        self.thrust_history = []
+        self.ref_x = []
+        self.ref_y = []
+        self.ref_z = []
+
 
     def move(self, sx_speed, dx_speed):
         """
@@ -160,6 +166,7 @@ class BlueBoatMPC(Node):
 
         x_est = self.ekf.get_state_estimate()
         d_est = self.ekf.get_disturbance_estimate()
+        print("position : ", x_est[0:6])
 
         # print("Disturbance estimate: ", d_est)
 
@@ -171,7 +178,7 @@ class BlueBoatMPC(Node):
         if self.actual_step < (self.steps_tot-1):
             self.actual_step += 1
             print("target : ", self.state_moving[self.actual_step, 0:6])
-        is_visible = self.camera_data.check_visibility(x_est[0:12], self.seen_it_once)
+        is_visible = self.camera_data.check_visibility(self.state_now, self.seen_it_once)
         if is_visible:
             # If visible modify the seen flag, estimate target position and get the trajectory
             self.seen_it_once = True
@@ -179,17 +186,20 @@ class BlueBoatMPC(Node):
             est_target_pos = est_target[0:3]
             est_target_vel = est_target[3:6]
 
-            self.ref_target = get_shadow_traj(x_est[0:12], est_target_pos, est_target_vel, dt = self.my_params.T_s,horizon_N = self.my_params.N+1, desired_dist=2.5)
-            #self.ref_target = get_shadow_ref(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
-
+            self.ref_target = get_shadow_traj(x_est[0:12], est_target_pos, est_target_vel, dt = self.my_params.T_s,horizon_N = self.my_params.N+1, desired_dist=3.0)
+            self.ref_target = get_shadow_LOS(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+            print("HERE HERE")
+            print("Reference Target: " , self.ref_target[0:6])
         elif not is_visible and self.seen_it_once:
 
             # Visible before but not now: use last seen position and et imaginary reference based on last seen position
             est_target = self.camera_data.get_camera_estimate(x_est[0:12], dt = self.my_params.T_s, camera_noise = self.camera_noise)
             est_target_pos = est_target[0:3]
             est_target_vel = est_target[3:6]
-            self.ref_target = get_shadow_ref(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.0)
-                
+            self.ref_target = get_shadow_LOS(x_est[0:12], est_target_pos, est_target_vel, desired_dist=1.0)
+            print("WAS HERE!")
+            print("Reference Target: " , self.ref_target[0:6])
+
             if self.camera_data.last_seen_t > 5.0:
                 # If not seen for more than 5 seconds, just stay still
                 self.ref_target = x_est[0:12]
@@ -200,11 +210,20 @@ class BlueBoatMPC(Node):
         else:
             # Not visible and never seen: stay still till i see something
             self.ref_target = self.wait_here[0:12]
+            print("READY")
+            print("Reference Target: " , self.ref_target[0:6])
+        ref_safe = np.atleast_2d(self.ref_target)  
 
+        self.ref_x.append(ref_safe[0, 0])
+        self.ref_y.append(ref_safe[0, 1])
+        self.ref_z.append(ref_safe[0, 2])
 
         u_optimal = self.solver.solve(x_est, self.ref_target, disturbance = d_est)
+        # Publishing the controls
         self.move(u_optimal[0], u_optimal[1])
         self.u_previous = u_optimal
+        self.thrust_history.append(u_optimal)
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -227,13 +246,27 @@ def main(args=None):
         rov_th = np.array(node.history_rov_th)
         rov_ps = np.array(node.history_rov_ps)
         target_data = np.array(node.history_target)
+        ref_data_x = np.array(node.ref_x)
+        ref_data_y = np.array(node.ref_y)
+        ref_data_z = np.array(node.ref_z)
+        node.thrust_history = np.array(node.thrust_history)
+
         dt = node.my_params.T_s
         size_max = min(np.size(node.state_moving[:,0]), np.size(rov_x))-1
         # node.sim.get_error_avg_std([rov_x, rov_y, rov_z], node.state_moving[:,:3].T, target_data[:,:3].T)
+        plot_TT_3d(np.array(node.state_moving[:size_max+1,0]), np.array(node.state_moving[:size_max+1,1]), np.array(node.state_moving[:size_max+1,2]),
+            ref_data_x, ref_data_y, ref_data_z, # Reference
+            np.array(rov_x[:size_max]), np.array(rov_y[:size_max]), np.array(rov_z[:size_max]),    # ROV Position
+            np.array(rov_ph[:size_max]), np.array(rov_th[:size_max]), np.array(rov_ps[:size_max]), # ROV Angles
+            node.thrust_history, dt
+        )
+        # LOS_plot_camera_fov(rov_x, rov_y, rov_z, rov_ps, rov_th, node.state_moving, dt)
+        # LOS_plot_dynamics(rov_x[:size_max], rov_y[:size_max], rov_z[:size_max], node.state_moving[:size_max+1,:], dt, desired_dist=2.0)
+
         LOS_plot_camera_fov(rov_x[:size_max], rov_y[:size_max], rov_z[:size_max], rov_ps[:size_max], rov_th[:size_max], node.state_moving[:size_max+1,:], dt)
 
         if len(rov_x) > 0:
-            slider, fig = LOS_interactive_viewer(rov_x, rov_y, rov_z, target_data, dt)
+            # slider, fig = LOS_interactive_viewer(rov_x, rov_y, rov_z, target_data, dt)
             plt.show()
         node.destroy_node()
         rclpy.shutdown()

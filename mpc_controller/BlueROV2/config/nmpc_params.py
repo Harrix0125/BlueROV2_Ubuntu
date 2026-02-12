@@ -3,7 +3,7 @@ import casadi as cas
 
 class NMPC_params:
 
-    N = 200          # Prediction horizon (steps) -> inside the solver i put them to 30 if nu = 2
+    N = 40        # Prediction horizon (steps) -> inside the solver i put them to 30 if nu = 2
     T_s = 0.05      # Time step (seconds) - between 10-20Hz ideally
 
     def __init__(self):
@@ -20,7 +20,7 @@ class BlueROV_Params(NMPC_params):
         # For gazebo data (It would be easy to get data for real world ROV aswell, at least for the mass as it is sufficient to weight it and there would be low error)
 
         self.fov_h = 90
-        self.fov_v = 80
+        self.fov_v = 90
         
         # Center of Gravity (CG) and Buoyancy (CB)
         # CG relative to CO
@@ -386,8 +386,8 @@ class BlueBoat_Params(NMPC_params):
         self.zb = 0.00   # erm
 
         
-        self.fov_h = 90
-        self.fov_v = 90
+        self.fov_h = 180
+        self.fov_v = 180
         
         self.Ix = 2.4   
         self.Iy = 4.0   
@@ -405,43 +405,50 @@ class BlueBoat_Params(NMPC_params):
         ])
         
         # Needed for Coriolis, again not true values
-        self.X_ud = -2.0 
-        self.Y_vd = -10.0 
-        self.Z_wd = -20.0 
-        self.K_pd = -1.0
-        self.M_qd = -5.0
-        self.N_rd = -3.0
+        self.X_ud = -8.0 
+        self.Y_vd = -50.0 
+        self.Z_wd = -50.0 
+        self.K_pd = -30.0
+        self.M_qd = -30.0
+        self.N_rd = -30.0
 
         # Linear Damping
-        self.D_LIN = -np.diag([3.0, 80.0, 50.0, 20.0, 20.0, 5.0]) 
+        self.D_LIN = np.diag([3.0, 80.0, 50.0, 20.0, 20.0, 5.0]) 
         # Nota: Y_v (80) to simulate lateral resistance
         
         # Quadratic Damping (imaginary)
         self.D_QUAD_COEFFS = np.array([5.0, 120.0, 100.0, 50.0, 50.0, 15.0])
 
+
+        self.Mrb = np.array([self.m, self.m, self.m, self.Ix, self.Iy, self.Iz])
+
+        # Added self.mass self.matrix (Ma)
+        self.Ma = -np.array([self.X_ud, self.Y_vd, self.Z_wd, self.K_pd, self.M_qd, self.N_rd])
+
+        # Total self.mass self.matrix (M)
+        self.M = self.Mrb + self.Ma
         # Semplification: needed
-        M_diag = np.array([self.m, self.m, self.m, self.Ix, self.Iy, self.Iz])
-        self.M_INV = np.diag(1.0/M_diag)
+        self.M_INV = np.diag(1.0/self.M)
 
         # Limiti Motori
         self.THRUST_MIN = -50.0 
         self.THRUST_MAX = 50.0  
-        self.R_THRUST = 3
+        self.R_THRUST = 0.01
 
         # --- TUNING NMPC ---
         # = 0 what we cant control
         # [x, y, z, phi, theta, psi]
-        self.Q_POS = [25, 25, 0.1, 0.1, 0.1, 10]
+        self.Q_POS = [10, 10, 0.1, 0.1, 0.1, 40]
         # [u, v, w, p, q, r]
-        self.Q_VEL = [15, 1, 0.1, 0.1, 0.1, 5.0]
+        self.Q_VEL = [5, 0.1, 0.1, 0.1, 0.1, 10.0]
         self.Q_diag = self.Q_POS + self.Q_VEL
         self.Q = cas.diag(self.Q_diag)
 
 
         # [x, y, z, phi, theta, psi]
-        self.Q_POS_N = [200, 200, 0.1, 0.1, 0.1, 50]
+        self.Q_POS_N = [180, 180, 0.1, 0.1, 0.1, 250]
         # [u, v, w, p, q, r]
-        self.Q_VEL_N = [20, 0.1, 0.1, 0.1, 0.1, 10]
+        self.Q_VEL_N = [80, 0.1, 0.1, 0.1, 0.1, 100]
         self.Q_diag_N = self.Q_POS_N + self.Q_VEL_N
         self.Q_N = cas.diag(self.Q_diag_N)
 
@@ -456,11 +463,11 @@ class BlueBoat_Params(NMPC_params):
         #    Low Q = Physics is perfect, ignore noisy sensors
         # Z, Roll, Pitch = 0 for process noise
         q_pos   = [0.5,  0.5,  10]  # x, y, z (z bloccato)
-        q_att   = [1e-3, 1e-3, 0.5 ]  # phi, theta, psi (roll/pitch bloccati)
+        q_att   = [10, 10, 0.5 ]  # phi, theta, psi (roll/pitch bloccati)
         q_vel   = [0.5,  0.5,  1e-3]  # u, v, w (w bloccato)
         q_rates = [1e-3, 1e-3, 0.5 ]  # p, q, r
         # Disturbance states
-        q_dist  = [0.5, 0.5, 1e-3, 1e-3, 1e-3, 0.1] 
+        q_dist  = [0.5, 0.5, 1e-3, 1e-3, 1e-3, 1] 
         self.AEKFD_Q = np.diag(q_pos + q_att + q_vel + q_rates + q_dist)
 
         # R: Measurement Noise (Trust in sensors)

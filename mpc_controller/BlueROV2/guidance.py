@@ -91,12 +91,20 @@ def get_shadow_LOS(rov_state, target_state, target_vel=None, desired_dist=2.0):
     if abs(diff) > np.pi:
         if diff > np.pi: yaw_des -= 2 * np.pi
         elif diff < -np.pi: yaw_des += 2 * np.pi
-        
+    
+    diff = yaw_des - rov_state[5]
+    angular_vel = 0
+    if np.abs(diff) < 0.1:
+        angular_vel = diff
+    else:
+        angular_vel = np.sqrt(np.abs(diff))*np.sign(diff)
+
+    
     # Transform global velocity to body frame reference (simplified)
     c_psi, s_psi = np.cos(yaw_des), np.sin(yaw_des)
-    u_ref = v_target_global[0] * c_psi + v_target_global[1] * s_psi
+    u_ref = v_target_global[0]
     v_ref = 0
-    w_ref = v_target_global[2]
+    w_ref = 0
 
     ref_state = np.zeros(12)
     ref_state[0:3] = p_reference
@@ -105,5 +113,6 @@ def get_shadow_LOS(rov_state, target_state, target_vel=None, desired_dist=2.0):
     ref_state[6] = u_ref
     ref_state[7] = v_ref
     ref_state[8] = w_ref
+    ref_state[11] = angular_vel
 
     return ref_state

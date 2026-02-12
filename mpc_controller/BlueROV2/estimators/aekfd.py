@@ -83,6 +83,9 @@ class AEKFD():
         x_pred = np.array(x_pred).flatten()
         F_matrix = np.array(F_matrix)
 
+        constrained_indeces =  [2,3,4,8,9,10]
+        if self.n_controls == 2:
+            x_pred[constrained_indeces] = 0.0
         # Update Covariance
         P_pred = F_matrix @ self.P_est @ F_matrix.T + self.Q
         self.x_est = x_pred
