@@ -60,11 +60,12 @@ class BlueROVMPC(Node):
         # self.ref_target[5] = 1.55
 
 
-        self.steps_tot = 1000
+        self.steps_tot = 2000
         self.actual_step = 0
         self.sim = Vehicle_Utils(self.my_params)
         # self.state_moving = self.sim.get_linear_traj(self.steps_tot, self.my_params.T_s, speed=0.9)
-        self.state_moving = self.sim.generate_target_trajectory(self.steps_tot, self.my_params.T_s, speed=0.75)
+        # self.state_moving = self.sim.generate_target_trajectory(self.steps_tot, self.my_params.T_s, speed=0.75)
+        self.state_moving = self.sim.get_random_traj(self.steps_tot, self.my_params.T_s, speed=0.7)
 
         self.camera_data = VisualTarget(start_state=self.state_moving[0,:], fov_h=self.my_params.fov_h, fov_v=self.my_params.fov_v, max_dist=10)
         self.seen_it_once = False

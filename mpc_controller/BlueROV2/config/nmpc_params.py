@@ -106,8 +106,8 @@ class BlueROV_Params(NMPC_params):
         
         # Tuning Weights
         # self.pos_coef = 5 #chill
-        self.pos_coef = 10
-        self.z_coef = self.pos_coef * 3
+        self.pos_coef = 12
+        self.z_coef = 30
         self.angle_coef = 5
         self.pitch_coef = 40
         self.psi_coef = 25
@@ -304,7 +304,7 @@ class GazeboROV_Params(NMPC_params):
         self.Q_VEL = [self.vel_coef, self.vel_coef, self.vel_coef, self.angV_coef, self.angV_coef, self.angV_coef]
         
         # Control Effort to self.minimize thruster usage: if too low it goes crazy and rotates
-        self.R_THRUST = 0.0008
+        self.R_THRUST = 0.002
         self.Q_diag = self.Q_POS + self.Q_VEL
         self.Q = cas.diag(self.Q_diag)
 
@@ -340,7 +340,7 @@ class GazeboROV_Params(NMPC_params):
         q_vel = [1.0, 1.0, 0.1]
         q_rates = [0.1, 0.1, 1]
 
-        q_dist = [1.0, 1.0, 0.5, 0.5, 0.5, 1.0]  # Disturbance states
+        q_dist = [1.0, 1.0, 0.5, 1.5, 0.5, 1.0]  # Disturbance states
         # q_dist = [0]*6
         q_diag = q_pos + q_att + q_vel + q_rates + q_dist
         self.AEKFD_Q = np.diag(q_diag)

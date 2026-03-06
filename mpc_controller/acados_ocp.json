@@ -1,7 +1,7 @@
 {
     "acados_include_path": "/home/enrico/acados/include",
     "acados_lib_path": "/home/enrico/acados/lib",
-    "code_export_directory": "/home/enrico/ros2_ws/src/mpc_controller/c_generated_code",
+    "code_export_directory": "/home/enrico/ros2_ws/src/mpc_controller/mpc_controller/c_generated_code",
     "constraints": {
         "C": [],
         "C_e": [],

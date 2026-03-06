@@ -9,7 +9,7 @@ from config.nmpc_params import BlueROV_Params, BlueBoat_Params
 from core.model import export_vehicle_model
 from utils.plotters import LOS_plot_dynamics, plot_TT_3d, LOS_plot_camera_fov
 from utils.plant_sim import Vehicle_Sim_Utils as Vehicle_Utils 
-from guidance import get_shadow_ref, get_shadow_traj, get_shadow_LOS
+from guidance import get_shadow_ref, get_shadow_traj, get_shadow_LOS, get_shadow_traj_BOAT, get_shadow_traj_ROV_optimized
 def simulation():
     vehicle_type = "BOAT"
     state_now = np.zeros(12)
@@ -42,7 +42,8 @@ def simulation():
 
 
     #   ----- Similation -----
-    t_simulation = 30 #sec
+    t_simulation = 20 #sec
+
     steps_tot = int(t_simulation /  my_params.T_s)
 
     # Assuming that this is the data we get from our ideal camera system
@@ -55,7 +56,7 @@ def simulation():
     if round == 3:      # Straight line
         state_moving = sim.get_linear_traj(steps_tot, my_params.T_s, speed=0.5)
     elif round == 4:    # Mad fella trajectory
-        state_moving = sim.generate_target_trajectory(steps_tot, my_params.T_s, speed=0.9)
+        state_moving = sim.generate_target_trajectory(steps_tot, my_params.T_s, speed=0.75)
     elif round == 5:    # Very mad trajectory
         state_moving = sim.get_random_traj(steps_tot, my_params.T_s, speed=0.7)
 
@@ -88,7 +89,7 @@ def simulation():
     # ----- External Disturbance setup -----
     is_there_disturbance = False
     estimated_disturbance = np.zeros(6)
-    force_world = np.array([-30,-30, 0])
+    force_world = np.array([-30,30, 0])
     tether_disturbance = np.array([0,0,0,0,0,0])
     real_disturbance = np.zeros(6)
 
@@ -105,11 +106,13 @@ def simulation():
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
                 if vehicle_type == "ROV":
+                    # ref_guidance = get_shadow_traj_ROV_optimized(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
                     ref_guidance = get_shadow_traj(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
-                    #ref_guidance = get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+                    # ref_guidance = get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
                 elif vehicle_type == "BOAT":
                     print("hi")
-                    ref_guidance = get_shadow_LOS(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+                    # ref_guidance = get_shadow_LOS(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+                    ref_guidance = get_shadow_traj_BOAT(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
 
 
             elif not is_visible and seen_it_once:
@@ -124,7 +127,7 @@ def simulation():
                     ref_guidance = get_shadow_LOS(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
                 
                 
-                if camera_data.last_seen_t > 5.0:
+                if camera_data.last_seen_t > 30.0:
                     # If not seen for more than 5 seconds, just stay still
                     ref_guidance = state_est[0:12]
                     ref_guidance[6:12] = 0.0
@@ -161,6 +164,8 @@ def simulation():
 
                 ekf.predict(u_optimal)
                 ekf.measurement_update(measured_state)
+                # ekf.measurement_update(measured_state)
+
                 state_est = ekf.get_state_estimate()
                 estimated_disturbance = ekf.get_disturbance_estimate()
             else:

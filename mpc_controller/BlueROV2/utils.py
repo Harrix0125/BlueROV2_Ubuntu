@@ -421,7 +421,9 @@ class Vehicle_Utils:
 
 
             # rnd Pitch (q) Up/DOwn
-            target_q = np.random.normal(0.0, 0.1) - (current_theta * 0.1)
+            target_q = np.random.normal(0.0, 0.1) + (current_theta * 0.1)
+            if states[0,2] > -0.1:
+                target_q = -1 * np.abs(target_q)
             #target_q = 0
             
             

@@ -7,7 +7,7 @@ def plot_TT_3d(target_x, target_y, target_z,
                rov_x, rov_y, rov_z, 
                rov_roll, rov_pitch, rov_yaw,
                thrust_history, dt, 
-               arrow_stride=20, arrow_length=1.5): 
+               arrow_stride=20, arrow_length=0.0): 
     """
     ref_x, ref_y, ref_z: 1D arrays of the Target/Reference path
     rov_x, ... rov_yaw: 1D arrays of Actual ROV state (Angles in Radians!)
@@ -59,9 +59,9 @@ def plot_TT_3d(target_x, target_y, target_z,
     vec_w = -np.sin(sub_pitch)
     
     # Plot the arrows (Red arrows indicate "Heading")
-    ax1.quiver(sub_x, sub_y, sub_z, 
-               vec_u, vec_v, vec_w, 
-               length=arrow_length, normalize=True, color='red', alpha=0.6, label='Heading')
+    # ax1.quiver(sub_x, sub_y, sub_z, 
+    #            vec_u, vec_v, vec_w, 
+    #            length=arrow_length, normalize=True, color='red', alpha=0.6, label='Heading')
 
     # Start/End Markers
     ax1.scatter(rov_x[0], rov_y[0], rov_z[0], c='green', marker='o', s=50, label='Start')

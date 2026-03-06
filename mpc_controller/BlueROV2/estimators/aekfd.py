@@ -32,6 +32,11 @@ class AEKFD():
         self.beta_max = 50.0
         self.gamma = 1.0
         self.nis_threshold = 9.0
+        self.use_vff = True
+        self.Kf = 3.5
+        self.lambda_min = 0.7
+        self.lambda_max = 1.0
+        self.lambda_k = 1.0
 
         self._setup_augmented_model(acados_model)
 
@@ -86,13 +91,17 @@ class AEKFD():
         constrained_indeces =  [2,3,4,8,9,10]
         if self.n_controls == 2:
             x_pred[constrained_indeces] = 0.0
+
+        Q_dist = np.eye(self.n_dist) * 0.01
+        Q_aug = self.Q.copy()
+        Q_aug[self.n_og_states: , self.n_og_states:] += Q_dist*self.dt
+
         # Update Covariance
-        P_pred = F_matrix @ self.P_est @ F_matrix.T + self.Q
+        P_pred = F_matrix @ self.P_est @ F_matrix.T + Q_aug
         self.x_est = x_pred
         self.P_est = P_pred
 
         return self.x_est
-    
 
     def measurement_update(self, measurement):
         if not self.initialized:
@@ -119,34 +128,44 @@ class AEKFD():
         # S = How much uncertainty total? (State P + Sensor R)
         S_k = H @ self.P_est @ H.T + self.R
         
-        #   VFF adaptive law
+        #  Adaptive Law from here
         nis = self.check_outlier(y_k, S_k)
-        beta = 1.0
-        # # We pass y_k (already wrapped) and S_k (includes R)
-        if (nis > 48.0): # Threshold for ~12 DOF 26.2
-        #     # REJECT: Return the predicted state as-is
-            print("Outlier rejected, NIS: ", nis)
-            return self.x_est
-        elif (nis > (self.nis_threshold+50)):
-            print("NIS greater than trheshold", nis)
-            beta = 1.0 + self.gamma*(nis - self.nis_threshold)
-            beta = min(beta,self.beta_max)          # should not need this anyway
+        #threshold of 3std deviation
+        gamma = 3.0 
+        d = np.sqrt(nis)
 
-            # Re-calculate self.P_est
-            self.P_est =self.P_est*beta
-            # Re-calculate S_k
-            S_k = H @ self.P_est @ H.T + self.R
+        # if d <= gamma:
+        #     weight = 1.0
+        #     # self.adapt_Q(y_k,S_k, nis)
+        # else:
+        #     # so the weight is just <= 1.0
+        #     weight = gamma / d 
+        #     print(f"Applying Huber weight: {weight:.3f} (NIS: {nis:.2f})")
+        #     # just to see we entered it
 
-        # Calculate Kalman Gain
-        K_k = self.P_est @ H.T @ np.linalg.inv(S_k)
         
-        # Update State
-        self.x_est = self.x_est + K_k @ y_k
-        
-        # Update Covariance # Search Joseph form as it should be more stable
-        I = np.eye(self.n_states)
-        self.P_est = (I - K_k @ H) @ self.P_est
+        if self.use_vff:
+            innovation_norm = np.linalg.norm(y_k)
+            self.lambda_k = np.exp(-self.Kf * innovation_norm)
+            if self.lambda_k < 0.05:
+                self.lambda_k = 0.05
+            K_k = self.P_est @ H.T @ np.linalg.inv(S_k)
+            self.x_est = self.x_est + K_k @ y_k
+            I = np.eye(self.n_states)
+            P_std = (I - K_k @ H) @ self.P_est @ (I - K_k @ H).T + K_k @ self.R @ K_k.T
+            P_agg = (1.0/self.lambda_k) * P_std
+            self.P_est = (1 - self.lambda_k) * P_agg + self.lambda_k * P_std
 
+        else:
+            K_k = self.P_est @ H.T @ np.linalg.inv(S_k)
+            self.x_est = self.x_est + K_k @ y_k
+            
+            # Update Covariance # Search Joseph form as it should be more stable
+            I = np.eye(self.n_states)
+            # self.P_est = (I - K_k @ H) @ self.P_est
+            #   THIS is Joseph form covariance update, to mathematically guarantee that the cov matrix remains sym & positive semi-def
+            #       given recalculation of K it is NOT granted with normal Pcov update
+            self.P_est = (I - K_k @ H) @ self.P_est @ (I - K_k @ H).T + K_k @ self.R @ K_k.T
         return self.x_est
     
     def check_outlier(self, y_k, S_k):
@@ -154,6 +173,21 @@ class AEKFD():
         # To add in EKF LaTeX notes
         d_squared = y_k.T @ np.linalg.inv(S_k) @ y_k
         return d_squared
+    
+    def adapt_Q(self, y_k, S_k, nis):
+        """
+        Adapting Q by a factor 
+        """
+        expected_nis = 12
+        
+        if nis > expected_nis * 1.5:   
+            # multiply Q
+            scale = 1.0 + 0.1 * (nis / expected_nis - 1.0)
+            scale = min(scale, 3.0)   # gotta cap it
+            self.Q *= scale
+        elif nis < expected_nis * 0.5:
+            scale = 0.95
+            self.Q *= scale
 
     def get_disturbance_estimate(self):
         return self.x_est[self.n_og_states:self.n_states]

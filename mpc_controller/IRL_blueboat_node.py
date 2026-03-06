@@ -13,12 +13,14 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 import matplotlib.pyplot as plt
 
-# ROS Msgs
+# ROS / MavROS msgs and stuff cmon
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64  
 from geometry_msgs.msg import Point
+from mavros_msgs.msg import OverrideRCIn
+from mavros_msgs.srv import CommandBool, SetMode
 
-# NMPC
+# Imports for NMPC
 import numpy as np
 import scipy.spatial.transform.rotation as R
 
@@ -71,23 +73,23 @@ class BlueBoatMPC(Node):
             depth=1
         )
 
+        #   This listens to blueboat odometry
         self.odom_sub = self.create_subscription(
             Odometry,
-            '/model/blueboat/odometry', # <--- Listening directly to Gazebo
+            '/mavros/local_position/odom', 
             self.odom_callback,
             qos_sensor
         )
-
-        self.left_pub = self.create_publisher(
-            Float64,
-             '/model/blueboat/joint/thruster_left_joint/cmd_thrust',
-              10 )
-        
-        self.right_pub = self.create_publisher(
-            Float64,
-             '/model/blueboat/joint/thruster_right_joint/cmd_thrust',
-              10 )
-        
+        #   Publishes (obv) the RC
+        self.rc_pub = self.create_publisher(
+            OverrideRCIn,
+            '/mavros/rc/override',
+            10
+        )
+        #   MavROS commands
+        self.arm_client = self.create_client(CommandBool, '/mavros/cmd/arming')
+        self.mode_client = self.create_client(SetMode, '/mavros/set_mode')
+        self.arm_boat()
 
         #   Camera Node
         self.use_real_camera = True  # Set to False to use the simulated imaginary target
@@ -119,10 +121,7 @@ class BlueBoatMPC(Node):
         self.history_target = []
         self.history_ref = []
         self.thrust_history = []
-        self.history_real_target_x = []
-        self.history_real_target_y = []
-        self.history_real_target_z = []
-
+        self.history_real_target = []
         self.ref_x = []
         self.ref_y = []
         self.ref_z = []
@@ -130,16 +129,28 @@ class BlueBoatMPC(Node):
 
     def move(self, sx_speed, dx_speed):
         """
-        Sends commands to left (sx) and right (dx) thruster
+        Translates NMPC left/right outputs to MAVROS PWM RC Overrides.
+        Note: Ensure sx_speed and dx_speed are normalized between -1.0 and 1.0.
         """
-        msg_sx = Float64()
-        msg_dx = Float64()
+        forward = (sx_speed + dx_speed) / 2.0
+        turn = (sx_speed - dx_speed) / 2.0  
 
-        msg_sx.data = float(sx_speed)
-        msg_dx.data = float(dx_speed)
+        #   Convert to PWM signals (1500 is neutral) : 
+        #       Using 400 as a multiplier, max speed is 1900, min is 1100
+        pwm_throttle = int(1500 + (forward * 400))
+        pwm_steering = int(1500 + (turn * 400))
 
-        self.left_pub.publish(msg_sx)
-        self.right_pub.publish(msg_dx)
+        pwm_throttle = max(1100, min(1900, pwm_throttle))
+        pwm_steering = max(1100, min(1900, pwm_steering))
+
+        # Ok i found this i hope this works
+        msg = OverrideRCIn()
+        channels = [65535] * 18
+        channels[0] = pwm_steering 
+        channels[2] = pwm_throttle  
+        
+        msg.channels = channels
+        self.rc_pub.publish(msg)
 
     def get_state_now(self, msg):
         y = msg.pose.pose.position.y
@@ -190,9 +201,6 @@ class BlueBoatMPC(Node):
             est_target = self.camera_data.get_camera_estimate(x_est[0:12], dt=self.my_params.T_s, camera_noise=self.camera_noise)
             est_target_pos = est_target[0:3]
             est_target_vel = est_target[3:6]
-            self.history_real_target_x.append(est_target_pos[0])
-            self.history_real_target_y.append(est_target_pos[1])
-            self.history_real_target_z.append(est_target_pos[2])
 
             self.ref_target = get_shadow_LOS(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
             
@@ -200,9 +208,6 @@ class BlueBoatMPC(Node):
             est_target = self.camera_data.get_camera_estimate(x_est[0:12], dt=self.my_params.T_s, camera_noise=self.camera_noise)
             est_target_pos = est_target[0:3]
             est_target_vel = est_target[3:6]
-            self.history_real_target_x.append(est_target_pos[0])
-            self.history_real_target_y.append(est_target_pos[1])
-            self.history_real_target_z.append(est_target_pos[2])
             self.ref_target = get_shadow_LOS(x_est[0:12], est_target_pos, est_target_vel, desired_dist=1.0)
 
             if self.camera_data.last_seen_t > 30.0:
@@ -213,6 +218,7 @@ class BlueBoatMPC(Node):
                 self.wait_here = x_est[0:12]
         else:
             self.ref_target = self.wait_here[0:12]
+
 
     def update_target_real(self, x_est):
         """Calculates the NMPC reference target using the physical stereo camera."""
@@ -239,7 +245,7 @@ class BlueBoatMPC(Node):
             est_target_pos = np.array([target_world_x, target_world_y, target_world_z])
             
             # Keep a distance of 2.5 meters from the real board
-            self.ref_target = get_shadow_LOS(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.0)
+            self.ref_target = get_shadow_LOS(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
 
         elif not is_actually_visible and self.seen_it_once:
             # Lost tag! Fall back to last known position but close the distance safely
@@ -254,7 +260,7 @@ class BlueBoatMPC(Node):
         else:
              # Never seen it, wait here
              self.ref_target = self.wait_here[0:12]
-
+        self.history_real_target.append(est_target_pos.copy())
 
     def odom_callback(self, msg):
         """
@@ -278,53 +284,6 @@ class BlueBoatMPC(Node):
         x_est = self.ekf.get_state_estimate()
         d_est = self.ekf.get_disturbance_estimate()
         print("position : ", x_est[0:6])
-
-        # print("Disturbance estimate: ", d_est)
-
-        # print("state now:", self.state_now)
-
-        # print("state estimated:", x_est)
-
-        # self.camera_data.truth_update(self.state_moving[self.actual_step,0:6])
-        # if self.actual_step < (self.steps_tot-1):
-        #     self.actual_step += 1
-        #     print("target : ", self.state_moving[self.actual_step, 0:6])
-        # is_visible = self.camera_data.check_visibility(self.state_now, self.seen_it_once)
-        # if is_visible:
-        #     # If visible modify the seen flag, estimate target position and get the trajectory
-        #     self.seen_it_once = True
-        #     est_target = self.camera_data.get_camera_estimate(x_est[0:12], dt = self.my_params.T_s, camera_noise = self.camera_noise)
-        #     est_target_pos = est_target[0:3]
-        #     est_target_vel = est_target[3:6]
-
-        #     self.ref_target = get_shadow_traj(x_est[0:12], est_target_pos, est_target_vel, dt = self.my_params.T_s,horizon_N = self.my_params.N+1, desired_dist=3.0)
-        #     self.ref_target = get_shadow_LOS(x_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
-        #     print("HERE HERE")
-        #     print("Reference Target: " , self.ref_target[0:6])
-        # elif not is_visible and self.seen_it_once:
-
-        #     # Visible before but not now: use last seen position and et imaginary reference based on last seen position
-        #     est_target = self.camera_data.get_camera_estimate(x_est[0:12], dt = self.my_params.T_s, camera_noise = self.camera_noise)
-        #     est_target_pos = est_target[0:3]
-        #     est_target_vel = est_target[3:6]
-        #     self.ref_target = get_shadow_LOS(x_est[0:12], est_target_pos, est_target_vel, desired_dist=1.0)
-        #     print("WAS HERE!")
-        #     print("Reference Target: " , self.ref_target[0:6])
-
-        #     if self.camera_data.last_seen_t > 30.0:
-        #         # If not seen for more than 5 seconds, just stay still
-        #         self.ref_target = x_est[0:12]
-        #         self.ref_target[6:12] = 0.0
-        #         self.ref_target[4] = 0 
-        #         self.seen_it_once = False
-        #         self.wait_here = x_est[0:12]
-        # else:
-        #     # Not visible and never seen: stay still till i see something
-        #     self.ref_target = self.wait_here[0:12]
-        #     print("READY")
-        #     print("Reference Target: " , self.ref_target[0:6])
-
-
         if self.use_real_camera:
             self.update_target_real(x_est)
         else:
@@ -343,6 +302,20 @@ class BlueBoatMPC(Node):
         self.u_previous = u_optimal
         self.thrust_history.append(u_optimal)
 
+    def arm_boat(self):
+        """Automatically sets the boat to MANUAL mode and ARMS the thrusters."""
+        self.get_logger().info("Waiting for MAVROS arming services...")
+        self.arm_client.wait_for_service()
+        self.mode_client.wait_for_service()
+        
+        req_mode = SetMode.Request()
+        req_mode.custom_mode = "MANUAL"
+        self.mode_client.call_async(req_mode)
+        
+        req_arm = CommandBool.Request()
+        req_arm.value = True
+        self.arm_client.call_async(req_arm)
+        self.get_logger().info("BlueBoat Armed and Ready!")
 
 def main(args=None):
     rclpy.init(args=args)
@@ -365,25 +338,25 @@ def main(args=None):
         rov_th = np.array(node.history_rov_th)
         rov_ps = np.array(node.history_rov_ps)
         target_data = np.array(node.history_target)
-        real_target_data_x = np.array(node.history_real_target_x)
-        real_target_data_y = np.array(node.history_real_target_y)
-        real_target_data_z = np.array(node.history_real_target_z)
+        real_target_data = np.array(node.history_real_target)
         ref_data_x = np.array(node.ref_x)
         ref_data_y = np.array(node.ref_y)
         ref_data_z = np.array(node.ref_z)
         node.thrust_history = np.array(node.thrust_history)
 
         dt = node.my_params.T_s
-        save_path = os.path.join(current_dir, 'BB_home_test.npz')
+        size_max = min(np.size(node.state_moving[:,0]), np.size(rov_x))-1
+        
+        save_path = os.path.join(current_dir, 'blueboat_flight_data.npz')
         np.savez(save_path, 
                         rov_x=rov_x, rov_y=rov_y, rov_z=rov_z, 
                         rov_ph=rov_ph, rov_th=rov_th, rov_ps=rov_ps, 
                         target=target_data, ref_x=ref_data_x, 
-                        real_target_data_x = real_target_data_x, real_target_data_y = real_target_data_y, real_target_data_z = real_target_data_z,
+                        real_target=real_target_data,
                         ref_y=ref_data_y, ref_z=ref_data_z, 
                         thrust=node.thrust_history, dt=dt)
 
-        size_max = min(np.size(node.state_moving[:,0]), np.size(rov_x))-1
+        
         # node.sim.get_error_avg_std([rov_x, rov_y, rov_z], node.state_moving[:,:3].T, target_data[:,:3].T)
         plot_TT_3d(np.array(node.state_moving[:size_max+1,0]), np.array(node.state_moving[:size_max+1,1]), np.array(node.state_moving[:size_max+1,2]),
             ref_data_x, ref_data_y, ref_data_z, # Reference
