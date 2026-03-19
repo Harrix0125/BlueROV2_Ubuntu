@@ -1,35 +1,121 @@
 import numpy as np
 
+# def get_shadow_ref(rov_state, target_state, target_vel=None, desired_dist=2.0):
+#     """ Calculates the 'Ideal State' (Shadow) for the NMPC to track. """
+#     p_rov = rov_state[0:3]
+#     p_target = target_state[0:3]
+#     v_target_global = target_vel if target_vel is not None else np.zeros(3)
+
+#     error_vector = p_rov - p_target
+#     dist_3d = np.linalg.norm(error_vector)
+
+#     if dist_3d < 0.01:
+#         direction_vect = np.array([-1.0, 0.0, 0.0])
+#     else:
+#         direction_vect = error_vector / dist_3d
+
+#     p_reference = p_target + direction_vect * desired_dist
+    
+#     # Calculate desired yaw to face target
+#     target_pointing_vector = p_target - p_reference
+#     yaw_des = np.arctan2(target_pointing_vector[1], target_pointing_vector[0])
+
+#     # Unwrapping yaw
+#     diff = yaw_des - rov_state[5]
+#     if abs(diff) > np.pi:
+#         if diff > np.pi: yaw_des -= 2 * np.pi
+#         elif diff < -np.pi: yaw_des += 2 * np.pi
+
+#     dist_plane = np.linalg.norm(target_pointing_vector[0:2])
+#     pitch_des = np.arctan2(-target_pointing_vector[2], dist_plane)
+
+#     # Transform global velocity to body frame reference (simplified)
+#     c_psi, s_psi = np.cos(yaw_des), np.sin(yaw_des)
+#     u_ref = v_target_global[0] * c_psi + v_target_global[1] * s_psi
+#     v_ref = -v_target_global[0] * s_psi + v_target_global[1] * c_psi
+#     w_ref = v_target_global[2]
+
+#     ref_state = np.zeros(12)
+#     ref_state[0:3] = p_reference
+#     ref_state[4] = pitch_des
+#     ref_state[5] = yaw_des
+#     ref_state[6] = u_ref
+#     ref_state[7] = v_ref
+#     ref_state[8] = w_ref
+
+#     return ref_state
+
+# def get_shadow_traj(rov_state, target_state, target_vel, dt, horizon_N, desired_dist=2.0):
+#     """ Generates a list of N reference states (The Trajectory) for the NMPC. """
+#     trajectory = []
+    
+#     # Initial reference based on current target position
+#     current_ref = get_shadow_ref(rov_state, target_state, target_vel, desired_dist)
+    
+#     v_target_global = target_vel if target_vel is not None else np.zeros(3)
+
+#     for k in range(int(horizon_N)):
+#         current_ref[0:3] += v_target_global * dt
+        
+#         target_pos_future = target_state[0:3] + v_target_global * (k * dt)
+#         pointing_vec = target_pos_future - current_ref[0:3]
+        
+#         current_ref[5] = np.arctan2(pointing_vec[1], pointing_vec[0]) # Yaw
+#         dist_plane = np.linalg.norm(pointing_vec[0:2])
+#         current_ref[4] = np.arctan2(-pointing_vec[2], dist_plane)     # Pitch
+        
+#         psi = current_ref[5]
+#         theta = current_ref[4]
+        
+#         c_p, s_p = np.cos(psi), np.sin(psi)
+#         current_ref[6] = v_target_global[0] * c_p + v_target_global[1] * s_p # u
+#         current_ref[7] = -v_target_global[0] * s_p + v_target_global[1] * c_p # v
+#         current_ref[8] = v_target_global[2]                                  # w (vertical)
+
+#         current_ref[9:12] = 0.0 
+
+#         trajectory.append(current_ref.copy())
+
+#     return np.array(trajectory)
+
+
 def get_shadow_ref(rov_state, target_state, target_vel=None, desired_dist=2.0):
-    """ Calculates the 'Ideal State' (Shadow) for the NMPC to track. """
-    p_rov = rov_state[0:3]
+    """ 
+    Calculates the 'Ideal State' (Shadow) using a 2.5D LOS approach.
+    Allows XY corner-cutting but strictly matches Target Z to prevent buoyancy drift.
+    """
     p_target = target_state[0:3]
+    p_rov = rov_state[0:3]
     v_target_global = target_vel if target_vel is not None else np.zeros(3)
 
-    error_vector = p_rov - p_target
-    dist_3d = np.linalg.norm(error_vector)
+    # 1. Calculate Horizontal (XY) LOS for smooth corner-cutting
+    error_xy = p_rov[0:2] - p_target[0:2]
+    dist_xy = np.linalg.norm(error_xy)
 
-    if dist_3d < 0.01:
-        direction_vect = np.array([-1.0, 0.0, 0.0])
+    if dist_xy < 0.01:
+        dir_xy = np.array([-1.0, 0.0])
     else:
-        direction_vect = error_vector / dist_3d
+        # Unit vector pointing from Target to ROV
+        dir_xy = error_xy / dist_xy
 
-    p_reference = p_target + direction_vect * desired_dist
-    
-    # Calculate desired yaw to face target
+    # 2. Build Reference: XY uses LOS, Z is rigidly locked to the Target
+    p_reference = np.zeros(3)
+    p_reference[0:2] = p_target[0:2] + dir_xy * desired_dist
+    p_reference[2] = p_target[2]  # Lock depth to break the feedback loop
+
+    # 3. Calculate desired yaw and pitch to face target
     target_pointing_vector = p_target - p_reference
     yaw_des = np.arctan2(target_pointing_vector[1], target_pointing_vector[0])
 
-    # Unwrapping yaw
+    # Unwrapping yaw safely
     diff = yaw_des - rov_state[5]
     if abs(diff) > np.pi:
-        if diff > np.pi: yaw_des -= 2 * np.pi
-        elif diff < -np.pi: yaw_des += 2 * np.pi
+        yaw_des -= np.sign(diff) * 2 * np.pi
 
     dist_plane = np.linalg.norm(target_pointing_vector[0:2])
     pitch_des = np.arctan2(-target_pointing_vector[2], dist_plane)
 
-    # Transform global velocity to body frame reference (simplified)
+    # 4. Transform global velocity to body frame reference
     c_psi, s_psi = np.cos(yaw_des), np.sin(yaw_des)
     u_ref = v_target_global[0] * c_psi + v_target_global[1] * s_psi
     v_ref = -v_target_global[0] * s_psi + v_target_global[1] * c_psi
@@ -46,35 +132,32 @@ def get_shadow_ref(rov_state, target_state, target_vel=None, desired_dist=2.0):
     return ref_state
 
 def get_shadow_traj(rov_state, target_state, target_vel, dt, horizon_N, desired_dist=2.0):
-    """ Generates a list of N reference states (The Trajectory) for the NMPC. """
+    """ 
+    Generates an N-step trajectory using decoupled LOS with Velocity Decay 
+    to prevent straight-line tangent overshoot on curves.
+    """
     trajectory = []
     
-    # Initial reference based on current target position
     current_ref = get_shadow_ref(rov_state, target_state, target_vel, desired_dist)
-    
     v_target_global = target_vel if target_vel is not None else np.zeros(3)
 
     for k in range(int(horizon_N)):
-        current_ref[0:3] += v_target_global * dt
+        ref_state_k = current_ref.copy()
         
-        target_pos_future = target_state[0:3] + v_target_global * (k * dt)
-        pointing_vec = target_pos_future - current_ref[0:3]
+        time_future = k * dt
         
-        current_ref[5] = np.arctan2(pointing_vec[1], pointing_vec[0]) # Yaw
-        dist_plane = np.linalg.norm(pointing_vec[0:2])
-        current_ref[4] = np.arctan2(-pointing_vec[2], dist_plane)     # Pitch
+        # THE FIX: Exponential Decay Factor
+        # Shrinks the straight-line prediction as we look further ahead.
+        # A decay rate of 0.8 means at 1 second into the future, we only project 45% 
+        # of the linear distance, preventing the reference from overtaking the curve.
+        decay_factor = np.exp(-0.8 * time_future)
         
-        psi = current_ref[5]
-        theta = current_ref[4]
+        # Project position using the decayed velocity
+        ref_state_k[0:3] = current_ref[0:3] + v_target_global * time_future * decay_factor
         
-        c_p, s_p = np.cos(psi), np.sin(psi)
-        current_ref[6] = v_target_global[0] * c_p + v_target_global[1] * s_p # u
-        current_ref[7] = -v_target_global[0] * s_p + v_target_global[1] * c_p # v
-        current_ref[8] = v_target_global[2]                                  # w (vertical)
-
-        current_ref[9:12] = 0.0 
-
-        trajectory.append(current_ref.copy())
+        # Keep orientation and body velocities locked
+        ref_state_k[9:12] = 0.0 
+        trajectory.append(ref_state_k)
 
     return np.array(trajectory)
 

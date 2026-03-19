@@ -32,7 +32,7 @@ class AEKFD():
         self.beta_max = 50.0
         self.gamma = 1.0
         self.nis_threshold = 9.0
-        self.use_vff = True
+        self.use_vff = False
         self.Kf = 3.5
         self.lambda_min = 0.7
         self.lambda_max = 1.0

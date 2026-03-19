@@ -64,7 +64,7 @@
 #define VEHICLE_MODEL_NY0    14
 #define VEHICLE_MODEL_NY     14
 #define VEHICLE_MODEL_NYN    12
-#define VEHICLE_MODEL_N      40
+#define VEHICLE_MODEL_N      80
 #define VEHICLE_MODEL_NH     0
 #define VEHICLE_MODEL_NHN    0
 #define VEHICLE_MODEL_NH0    0

@@ -2,12 +2,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from estimators.aekfd import AEKFD as EKF
-from estimators.target_estimator import VisualTarget
+from estimators.target_est_2 import VisualTarget
 
 from nmpc_solver_acados import Acados_Solver_Wrapper
 from config.nmpc_params import BlueROV_Params, BlueBoat_Params
 from core.model import export_vehicle_model
-from utils.plotters import LOS_plot_dynamics, plot_TT_3d, LOS_plot_camera_fov
+from utils.plotters import LOS_plot_dynamics, plot_TT_3d, LOS_plot_camera_fov, LOS_plot_dynamics_desired
 from utils.plant_sim import Vehicle_Sim_Utils as Vehicle_Utils 
 from guidance import get_shadow_ref, get_shadow_traj, get_shadow_LOS, get_shadow_traj_BOAT, get_shadow_traj_ROV_optimized
 def simulation():
@@ -25,7 +25,7 @@ def simulation():
     print("Compiling Acados Solver...")
     solver = Acados_Solver_Wrapper(my_params)
     print("Compilation Complete.")
-
+    desired_dist = 2.5
 
     # I'll clean this up i swear
     # ----- Simulation data collection -----
@@ -42,7 +42,7 @@ def simulation():
 
 
     #   ----- Similation -----
-    t_simulation = 20 #sec
+    t_simulation = 105 #sec
 
     steps_tot = int(t_simulation /  my_params.T_s)
 
@@ -52,14 +52,20 @@ def simulation():
 
 
     # TO MODIFY: JUST KEEPING TRACK OF WHAT TYPE OF MISSION WE ARE DOING
-    round = 4
+    round = 7
     if round == 3:      # Straight line
         state_moving = sim.get_linear_traj(steps_tot, my_params.T_s, speed=0.5)
     elif round == 4:    # Mad fella trajectory
         state_moving = sim.generate_target_trajectory(steps_tot, my_params.T_s, speed=0.75)
     elif round == 5:    # Very mad trajectory
         state_moving = sim.get_random_traj(steps_tot, my_params.T_s, speed=0.7)
-
+    elif round == 6:    # Spiral / Circle Dive
+        # Check if we are simulating the boat to flatten the Z axis
+        is_surface_vessel = (vehicle_type == "BOAT")
+        state_moving = sim.get_spiral_traj(steps_tot, my_params.T_s, speed=0.5, is_boat=is_surface_vessel)
+    elif round == 7:
+        is_surface_vessel = (vehicle_type == "BOAT")
+        state_moving = sim.get_mixed_traj(steps_tot, my_params.T_s, speed=0.6, is_boat=is_surface_vessel)
 
 
 
@@ -74,7 +80,7 @@ def simulation():
 
     # Too many flags
     testing_EKF = True
-    is_there_noise = False
+    is_there_noise = True
     noise_ekf = my_params.noise_ekf if is_there_noise else np.array([0.0]*12)    
     print("noise_ekf:", noise_ekf)
 
@@ -87,9 +93,9 @@ def simulation():
 
 
     # ----- External Disturbance setup -----
-    is_there_disturbance = False
+    is_there_disturbance = True
     estimated_disturbance = np.zeros(6)
-    force_world = np.array([-30,30, 0])
+    force_world = np.array([-5,5,0])
     tether_disturbance = np.array([0,0,0,0,0,0])
     real_disturbance = np.zeros(6)
 
@@ -106,25 +112,25 @@ def simulation():
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
                 if vehicle_type == "ROV":
-                    # ref_guidance = get_shadow_traj_ROV_optimized(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
-                    ref_guidance = get_shadow_traj(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
-                    # ref_guidance = get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+                    # ref_guidance = get_shadow_traj_ROV_optimized(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist)
+                    ref_guidance = get_shadow_traj(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=desired_dist)
+                    # ref_guidance = get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist)
                 elif vehicle_type == "BOAT":
-                    print("hi")
-                    # ref_guidance = get_shadow_LOS(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
-                    ref_guidance = get_shadow_traj_BOAT(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=2.5)
+                    
+                    # ref_guidance = get_shadow_LOS(state_est[0:12], est_target_pos, est_target_vel, desired_dist)
+                    ref_guidance = get_shadow_traj_BOAT(state_est[0:12], est_target_pos, est_target_vel, dt = my_params.T_s,horizon_N = my_params.N+1, desired_dist=desired_dist)
 
 
             elif not is_visible and seen_it_once:
-
+                print("lost him")
                 # Visible before but not now: use last seen position and et imaginary reference based on last seen position
                 est_target = camera_data.get_camera_estimate(state_est[0:12], dt = my_params.T_s, camera_noise = camera_noise)
                 est_target_pos = est_target[0:3]
                 est_target_vel = est_target[3:6]
                 if vehicle_type == "ROV":
-                    ref_guidance = get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.0)
+                    ref_guidance = get_shadow_ref(state_est[0:12], est_target_pos, est_target_vel, desired_dist=3)
                 elif vehicle_type == "BOAT":
-                    ref_guidance = get_shadow_LOS(state_est[0:12], est_target_pos, est_target_vel, desired_dist=2.5)
+                    ref_guidance = get_shadow_LOS(state_est[0:12], est_target_pos, est_target_vel, desired_dist=3)
                 
                 
                 if camera_data.last_seen_t > 30.0:
@@ -148,7 +154,7 @@ def simulation():
             # Plant Step [Imagine this as GPS data cause we dont have GPS data AND RK4might be a little different from drone state estimation so there is error (good i guess otherwise we are just simulating in same perfect hysics)]
             if is_there_disturbance == False:
                 real_disturbance[0:6] = np.zeros(6)
-            elif i > 200:
+            elif i > 0:
                 real_disturbance[0:3] = sim.force_w2b(state_est, force_world*np.abs(np.sin(i/400)))
             else:
                 real_disturbance[0:3] = sim.force_w2b(state_est, force_world*0)
@@ -233,7 +239,7 @@ def simulation():
         thrust_history, my_params.T_s
     )
         
-    LOS_plot_dynamics(traj_x, traj_y, traj_z, state_moving, my_params.T_s, desired_dist=2.0)
+    LOS_plot_dynamics_desired(traj_x, traj_y, traj_z, state_moving, my_params.T_s, desired_dist, ref_x=ref_x, ref_y=ref_y, ref_z=ref_z)
 
     if testing_EKF:
         plot_TT_3d(np.array(target_estimation_x), np.array(target_estimation_y), np.array(target_estimation_z),
@@ -242,7 +248,7 @@ def simulation():
             np.array(traj_phi), np.array(traj_theta), np.array(traj_psi), # ROV Angles
             thrust_history, my_params.T_s
         )
-        LOS_plot_dynamics(EKFtraj_x, EKFtraj_y, EKFtraj_z, state_moving, my_params.T_s, desired_dist=2.0)
+        LOS_plot_dynamics_desired(EKFtraj_x, EKFtraj_y, EKFtraj_z, state_moving, my_params.T_s, desired_dist, ref_x=ref_x, ref_y=ref_y, ref_z=ref_z)
             
         LOS_plot_camera_fov(traj_x, traj_y, traj_z, traj_psi, traj_theta, state_moving, my_params.T_s)
         sim.get_error_avg_std([traj_x, traj_y, traj_z], state_moving[:,:3].T, [ref_x, ref_y, ref_z])

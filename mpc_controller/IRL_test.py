@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 import time
 
-from mavros_msgs.msg import OverrideRCIn
+from mavros_msgs.msg import OverrideRCIn, State
 from mavros_msgs.srv import CommandBool, SetMode
 
 class HardwareTestNode(Node):
@@ -11,9 +11,21 @@ class HardwareTestNode(Node):
         self.rc_pub = self.create_publisher(OverrideRCIn, '/mavros/rc/override', 10)
         self.arm_client = self.create_client(CommandBool, '/mavros/cmd/arming')
         self.mode_client = self.create_client(SetMode, '/mavros/set_mode')
+        self.state_sub = self.create_subscription(State, '/mavros/state', self.state_cb, 10)
+        self.current_state = None
+
+    def state_cb(self, msg):
+        self.current_state = msg
+
+    def wait_for_mode(self, target_mode, timeout=5.0):
+        start = time.time()
+        while time.time() - start < timeout:
+            rclpy.spin_once(self, timeout_sec=0.1)
+            if self.current_state and self.current_state.mode == target_mode:
+                return True
+        return False
 
     def arm_boat(self):
-        """Forcefully sets MANUAL mode and ARMS."""
         self.get_logger().info("Waiting for MAVROS...")
         self.arm_client.wait_for_service()
         self.mode_client.wait_for_service()
@@ -24,13 +36,28 @@ class HardwareTestNode(Node):
         future_mode = self.mode_client.call_async(req_mode)
         rclpy.spin_until_future_complete(self, future_mode)
 
+        if not future_mode.result() or not future_mode.result().mode_sent:
+            self.get_logger().error("Failed to set MANUAL mode")
+            return False
+
+        # Wait for mode to take effect
+        if not self.wait_for_mode("MANUAL"):
+            self.get_logger().error("Mode did not switch to MANUAL")
+            return False
+
         self.get_logger().info("ARMING vehicle...")
         req_arm = CommandBool.Request()
         req_arm.value = True
         future_arm = self.arm_client.call_async(req_arm)
         rclpy.spin_until_future_complete(self, future_arm)
-        self.get_logger().info(f"Armed status: {future_arm.result().success}")
 
+        if future_arm.result() and future_arm.result().success:
+            self.get_logger().info("Armed successfully")
+            return True
+        else:
+            self.get_logger().error("Arming failed")
+            return False
+        
     def disarm_boat(self):
         """Safely disarms the vehicle."""
         self.get_logger().info("DISARMING vehicle...")

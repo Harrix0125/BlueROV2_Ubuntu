@@ -3,7 +3,7 @@ import casadi as cas
 
 class NMPC_params:
 
-    N = 40        # Prediction horizon (steps) -> inside the solver i put them to 30 if nu = 2
+    N = 80        # Prediction horizon (steps) -> inside the solver i put them to 30 if nu = 2   120for ROV
     T_s = 0.05      # Time step (seconds) - between 10-20Hz ideally
 
     def __init__(self):
@@ -106,11 +106,11 @@ class BlueROV_Params(NMPC_params):
         
         # Tuning Weights
         # self.pos_coef = 5 #chill
-        self.pos_coef = 12
-        self.z_coef = 30
+        self.pos_coef = 25
+        self.z_coef = 35
         self.angle_coef = 5
-        self.pitch_coef = 40
-        self.psi_coef = 25
+        self.pitch_coef = 80
+        self.psi_coef = 40
         self.Q_POS = [self.pos_coef, self.pos_coef, self.z_coef, self.angle_coef, self.pitch_coef, self.psi_coef] 
         
         
@@ -119,13 +119,13 @@ class BlueROV_Params(NMPC_params):
         self.Q_VEL = [self.vel_coef, self.vel_coef, self.vel_coef, self.angV_coef, self.angV_coef, self.angV_coef]
         
         # Control Effort to self.minimize thruster usage: if too low it goes crazy and rotates
-        self.R_THRUST = 0.005
+        self.R_THRUST = 0.002
         self.Q_diag = self.Q_POS + self.Q_VEL
         self.Q = cas.diag(self.Q_diag)
 
         #   Weights at time = N
         # pos_n = 150  #chill
-        self.pos_N = 150.0
+        self.pos_N = 250.0
         self.angle_N = 150.0
         self.Q_POS_N = [self.pos_N, self.pos_N, self.pos_N*1.5, self.angle_N, self.angle_N, self.angle_N] 
 
@@ -431,24 +431,24 @@ class BlueBoat_Params(NMPC_params):
         self.M_INV = np.diag(1.0/self.M)
 
         # Limiti Motori
-        self.THRUST_MIN = -50.0 
-        self.THRUST_MAX = 50.0  
-        self.R_THRUST = 0.01
+        self.THRUST_MIN = -40.0 
+        self.THRUST_MAX = 40.0  
+        self.R_THRUST = 0.0008
 
         # --- TUNING NMPC ---
         # = 0 what we cant control
         # [x, y, z, phi, theta, psi]
-        self.Q_POS = [10, 10, 0.1, 0.1, 0.1, 40]
+        self.Q_POS = [35, 35, 0.1, 0.1, 0.1, 40]
         # [u, v, w, p, q, r]
-        self.Q_VEL = [5, 0.1, 0.1, 0.1, 0.1, 10.0]
+        self.Q_VEL = [8, 0.1, 0.1, 0.1, 0.1, 10.0]
         self.Q_diag = self.Q_POS + self.Q_VEL
         self.Q = cas.diag(self.Q_diag)
 
 
         # [x, y, z, phi, theta, psi]
-        self.Q_POS_N = [180, 180, 0.1, 0.1, 0.1, 250]
+        self.Q_POS_N = [300, 300, 0.1, 0.1, 0.1, 310]
         # [u, v, w, p, q, r]
-        self.Q_VEL_N = [80, 0.1, 0.1, 0.1, 0.1, 100]
+        self.Q_VEL_N = [100, 0.1, 0.1, 0.1, 0.1, 100]
         self.Q_diag_N = self.Q_POS_N + self.Q_VEL_N
         self.Q_N = cas.diag(self.Q_diag_N)
 
@@ -467,7 +467,7 @@ class BlueBoat_Params(NMPC_params):
         q_vel   = [0.5,  0.5,  1e-3]  # u, v, w (w bloccato)
         q_rates = [1e-3, 1e-3, 0.5 ]  # p, q, r
         # Disturbance states
-        q_dist  = [0.5, 0.5, 1e-3, 1e-3, 1e-3, 1] 
+        q_dist  = [2, 2, 1e-3, 1e-3, 1e-3, 2] 
         self.AEKFD_Q = np.diag(q_pos + q_att + q_vel + q_rates + q_dist)
 
         # R: Measurement Noise (Trust in sensors)

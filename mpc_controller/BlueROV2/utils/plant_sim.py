@@ -122,7 +122,7 @@ class Vehicle_Sim_Utils:
 
         states[0,0] = 1.8
         states[0,1] = -3
-        states[0,2] = -1.5
+        states[0,2] = -0.5
         states[0,6] = speed
         
         current_x, current_y = states[0, 0], states[0, 1]
@@ -143,7 +143,7 @@ class Vehicle_Sim_Utils:
 
         states[0,0] = 1.8
         states[0,1] = -3
-        states[0,2] = -1.5
+        states[0,2] = -0.5
         states[0,6] = speed
         change_dir = []
         seconds = steps*dt
@@ -170,7 +170,7 @@ class Vehicle_Sim_Utils:
 
             if number_ankles_broken < len(change_dir) and k == change_dir[number_ankles_broken]:
                 number_ankles_broken +=1
-                states[0,5] += np.deg2rad(np.random.randint(-75,75))
+                states[0,5] += np.deg2rad(np.random.randint(-90,90))
                 speed = min(speed_cap, speed + incremental_speed)+0.1
                 dx = speed * np.cos(states[0,4]) * np.cos(states[0,5])
                 dy = speed * np.cos(states[0,4]) * np.sin(states[0,5])
@@ -181,6 +181,195 @@ class Vehicle_Sim_Utils:
             states[k+1, 2:11] = states[0, 2:11]
 
         return states
+    def get_spiral_traj(self, steps, dt, speed, is_boat=False):
+        """ 
+        Generates a trajectory: straight, then 3 large circles (spiraling down if ROV), then straight.
+        """
+        states = np.zeros((steps, 12))
+
+        # Initial states (matching the linear trajectory starting position)
+        states[0,0] = 1.8
+        states[0,1] = -3.0
+        states[0,2] = 0.0 if is_boat else -2.0
+        states[0,4] = 0.0  # Pitch
+        states[0,5] = 0.0  # Yaw
+        states[0,6] = speed
+
+        current_x, current_y, current_z = states[0, 0], states[0, 1], states[0, 2]
+        current_theta, current_psi = states[0, 4], states[0, 5]
+
+        # Phase 1: Straight line for the first few seconds
+        t_straight = 10.0
+        k_straight = int(t_straight / dt)
+
+        # Phase 2: Big circles
+        target_radius = 5.0
+        yaw_rate = speed / target_radius 
+        
+        # Time required to complete exactly 3 circles (3 * 2pi radians)
+        t_circles = (3 * 2 * np.pi) / yaw_rate
+        k_circles = int(t_circles / dt)
+
+        # Depth parameters: dive by 6 meters (ending at -8.0m for the ROV)
+        z_drop_total = -6.0 
+        z_rate = z_drop_total / t_circles if not is_boat else 0.0
+
+        for k in range(steps - 1):
+            target_u = speed
+            target_r = 0.0
+            
+            if k < k_straight:
+                # PHASE 1: Straight
+                target_r = 0.0
+                current_theta = 0.0
+            elif k < k_straight + k_circles:
+                # PHASE 2: 3 Circles and Dive
+                target_r = yaw_rate
+                if not is_boat:
+                    # Calculate required pitch to achieve the dive rate
+                    # Since dz = -u * sin(theta), we invert this to find the required pitch angle
+                    req_theta = np.arcsin(np.clip(-z_rate / speed, -1.0, 1.0))
+                    current_theta = req_theta
+            else:
+                # PHASE 3: Straight again
+                target_r = 0.0
+                current_theta = 0.0 # Level out to hold the new depth
+
+            # Integrate orientations
+            current_psi += target_r * dt
+
+            # Record states
+            states[k+1, 6] = target_u
+            states[k+1, 10] = 0.0 
+            states[k+1, 11] = target_r
+            states[k+1, 4] = current_theta
+            states[k+1, 5] = current_psi
+
+            # Kinematic position update
+            dx = target_u * np.cos(current_theta) * np.cos(current_psi)
+            dy = target_u * np.cos(current_theta) * np.sin(current_psi)
+            dz = -target_u * np.sin(current_theta)
+
+            current_x += dx * dt
+            current_y += dy * dt
+            current_z += dz * dt
+
+            states[k+1, 0] = current_x
+            states[k+1, 1] = current_y
+            states[k+1, 2] = current_z
+
+        return states
+
+    def get_mixed_traj(self, steps, dt, speed, is_boat=False):
+        """ 
+        Ultimate Gauntlet: 
+        Phase 1: Straight for 10m 
+        Phase 2: 1 Full Circle (Diving if ROV)
+        Phase 3: Sharp angles (ankle breakers) and aggressive accel/decel.
+        """
+        states = np.zeros((steps, 12))
+
+        # Initial states
+        states[0,0] = 1.8
+        states[0,1] = -3.0
+        states[0,2] = 0.0 if is_boat else -0.5
+        states[0,4] = 0.0  # Pitch
+        states[0,5] = 0.0  # Yaw
+        states[0,6] = speed
+
+        current_x, current_y, current_z = states[0, 0], states[0, 1], states[0, 2]
+        current_theta, current_psi = states[0, 4], states[0, 5]
+
+        # Tracking variables for phase transitions
+        dist_covered = 0.0
+        phase = 1
+        circle_steps = 0
+        
+        # Phase 2 Parameters
+        target_radius = 5.0
+        yaw_rate = speed / target_radius 
+        k_circle_total = int((2 * np.pi) / yaw_rate / dt)
+        
+        z_drop_total = -6.0 
+        z_rate = z_drop_total / (k_circle_total * dt) if not is_boat else 0.0
+
+        # Phase 3 Parameters (from get_random_traj)
+        next_turn_step = 0
+        min_secs = 2
+        max_secs = 11
+        incremental_speed = 0.7
+        speed_cap = 1.1
+
+        for k in range(steps - 1):
+            target_r = 0.0
+            target_q = 0.0
+            
+            # --- PHASE LOGIC ---
+            if phase == 1:
+                # PHASE 1: Straight until 10 meters covered
+                dist_covered += speed * dt
+                if dist_covered >= 10.0:
+                    phase = 2
+                    
+            elif phase == 2:
+                # PHASE 2: One Circle and Dive
+                target_r = yaw_rate
+                if not is_boat:
+                    req_theta = np.arcsin(np.clip(-z_rate / speed, -1.0, 1.0))
+                    current_theta = req_theta
+                
+                circle_steps += 1
+                if circle_steps >= k_circle_total:
+                    phase = 3
+                    current_theta = 0.0 # Level out for the random walk
+                    # Schedule the first random sharp turn
+                    next_turn_step = k + int(np.random.randint(min_secs, max_secs) / dt)
+                    
+            elif phase == 3:
+                # PHASE 3: Sharp Angles & Accelerations
+                if k >= next_turn_step:
+                    # The "Ankle Breaker": Instant heading change (-90 to +90 degrees)
+                    current_psi += np.deg2rad(np.random.randint(-90, 90))
+                    
+                    # Aggressive acceleration spike
+                    speed = min(speed_cap, speed + incremental_speed) + 0.1
+                    
+                    # Schedule the next turn
+                    next_turn_step = k + int(np.random.randint(min_secs, max_secs) / dt)
+
+                # Gradual deceleration between turns to force the controller to manage speed changes
+                speed = max(0.2, speed - incremental_speed * (2 / (min_secs + max_secs)) * dt)
+
+            # --- KINEMATICS INTEGRATION ---
+            current_psi += target_r * dt
+            current_theta += target_q * dt
+
+            # Record states
+            states[k+1, 6] = speed
+            states[k+1, 10] = target_q 
+            states[k+1, 11] = target_r
+            states[k+1, 4] = current_theta
+            states[k+1, 5] = current_psi
+
+            # Position update
+            dx = speed * np.cos(current_theta) * np.cos(current_psi)
+            dy = speed * np.cos(current_theta) * np.sin(current_psi)
+            dz = -speed * np.sin(current_theta)
+
+            current_x += dx * dt
+            current_y += dy * dt
+            current_z += dz * dt
+
+            # Hard lock the boat to the surface
+            if is_boat:
+                current_z = 0.0
+
+            states[k+1, 0] = current_x
+            states[k+1, 1] = current_y
+            states[k+1, 2] = current_z
+
+        return states
+    
 
     def get_error_avg_std(self, state_estimate, target_state, ref_state):
         """
@@ -242,3 +431,42 @@ class Vehicle_Sim_Utils:
             'mae_z': mae_z,
             'avg_3d': avg_3d_dist
         }
+    
+    def force_w2b(self, rov_state, force_world):
+        """
+        Rotate Force into Body frame
+        """
+        phi, theta, psi = rov_state[3],rov_state[4], rov_state[5]
+        R_B2W = self.get_J1_np(phi, theta, psi)
+
+        force_lin_body = R_B2W.T @ force_world[0:3]
+
+        return force_lin_body
+    
+    def get_J1_np(self, phi, theta, psi):
+        """
+        Numpy implementation of Rotation Matrix (Body -> World).
+        Standard Z-Y-X rotation sequence.
+        """
+        cphi, sphi = np.cos(phi), np.sin(phi)
+        cth, sth = np.cos(theta), np.sin(theta)
+        cpsi, spsi = np.cos(psi), np.sin(psi)
+
+        r11 = cpsi * cth
+        r12 = -spsi * cphi + sphi * sth * cpsi
+        r13 = spsi * sphi + sth * cpsi * cphi
+
+        r21 = spsi * cth
+        r22 = cpsi * cphi + sphi * sth * spsi
+        r23 = -cpsi * sphi + sth * spsi * cphi
+
+        r31 = -sth
+        r32 = sphi * cth
+        r33 = cphi * cth
+
+        J1 = np.array([
+            [r11, r12, r13],
+            [r21, r22, r23],
+            [r31, r32, r33]
+        ])
+        return J1
